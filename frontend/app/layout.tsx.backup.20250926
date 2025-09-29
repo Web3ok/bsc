@@ -1,0 +1,63 @@
+'use client';
+
+import { Inter } from 'next/font/google';
+import { NextUIProvider } from '@nextui-org/react';
+import { ThemeProvider as NextThemesProvider } from 'next-themes';
+import { QueryClient, QueryClientProvider } from 'react-query';
+import { Toaster } from 'react-hot-toast';
+import { useState } from 'react';
+import { WebSocketProvider } from '../contexts/WebSocketContext';
+import Navigation from '../components/Navigation';
+
+import './globals.css';
+
+const inter = Inter({ subsets: ['latin'] });
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: 2,
+        staleTime: 5 * 60 * 1000, // 5 minutes
+        cacheTime: 10 * 60 * 1000, // 10 minutes
+      },
+    },
+  }));
+
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body className={inter.className}>
+        <QueryClientProvider client={queryClient}>
+          <NextUIProvider>
+            <NextThemesProvider
+              attribute="class"
+              defaultTheme="light"
+              themes={['light', 'dark']}
+            >
+              <WebSocketProvider>
+                <div className="min-h-screen bg-background">
+                  <Navigation />
+                  <main className="container mx-auto p-6 max-w-7xl">
+                    {children}
+                  </main>
+                </div>
+                <Toaster
+                  position="top-right"
+                  toastOptions={{
+                    duration: 4000,
+                  }}
+                />
+              </WebSocketProvider>
+            </NextThemesProvider>
+          </NextUIProvider>
+        </QueryClientProvider>
+      </body>
+    </html>
+  );
+}
+
+

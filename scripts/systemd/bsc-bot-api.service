@@ -1,0 +1,45 @@
+[Unit]
+Description=BSC Trading Bot API Server
+Documentation=https://github.com/your-username/bsc-bot
+After=network.target mysql.service redis.service
+Wants=mysql.service redis.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/bsc-bot
+ExecStart=/usr/bin/node dist/server.js
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Environment
+Environment=NODE_ENV=production
+Environment=API_PORT=3010
+EnvironmentFile=-/opt/bsc-bot/.env
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bsc-bot/logs
+ReadWritePaths=/opt/bsc-bot/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bsc-bot-api
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=32768
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

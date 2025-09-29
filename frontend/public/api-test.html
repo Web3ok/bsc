@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API Test Page</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testAPI() {
+            const resultsDiv = document.getElementById('results');
+            
+            try {
+                resultsDiv.innerHTML += '<p>Testing API connection...</p>';
+                
+                // Test dashboard overview
+                const response = await fetch('http://localhost:10001/api/dashboard/overview');
+                const data = await response.json();
+                
+                resultsDiv.innerHTML += `<p>✅ API Response: ${JSON.stringify(data, null, 2)}</p>`;
+                
+                // Test dashboard status
+                const statusResponse = await fetch('http://localhost:10001/api/dashboard/status');
+                const statusData = await statusResponse.json();
+                
+                resultsDiv.innerHTML += `<p>✅ Status Response: ${JSON.stringify(statusData, null, 2)}</p>`;
+                
+            } catch (error) {
+                resultsDiv.innerHTML += `<p>❌ Error: ${error.message}</p>`;
+            }
+        }
+        
+        // Run test when page loads
+        window.onload = testAPI;
+    </script>
+</body>
+</html>

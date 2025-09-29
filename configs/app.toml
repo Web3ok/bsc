@@ -1,0 +1,69 @@
+# BSC Market Maker Bot Configuration
+
+[chain]
+id = 56
+name = "BSC"
+wbnb_address = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+
+[rpc]
+primary_urls = ["https://bsc-dataseed1.binance.org/"]
+backup_urls = [
+  "https://bsc-dataseed2.binance.org/",
+  "https://bsc-dataseed3.binance.org/",
+  "https://bsc-dataseed4.binance.org/"
+]
+max_retries = 3
+timeout_ms = 10000
+rate_limit_per_second = 10
+health_check_interval = 30
+
+[pancakeswap]
+v2_router = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+v2_factory = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73"
+v3_router = "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4"
+v3_factory = "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865"
+
+[trading]
+default_slippage = 0.5
+max_slippage = 5.0
+max_price_impact = 3.0
+deadline_minutes = 20
+min_trade_value_bnb = 0.001
+
+[gas]
+auto_gas = true
+max_gas_price_gwei = 20
+priority_fee_gwei = 2
+gas_multiplier = 1.1
+
+[limits]
+max_concurrent_transactions = 5
+transaction_rate_limit_per_second = 2
+batch_size_limit = 50
+max_position_size_bnb = 10
+max_daily_volume_bnb = 100
+
+[risk]
+enable_whitelist = true
+enable_blacklist = true
+emergency_stop_loss_percent = 10
+max_wallet_exposure_percent = 20
+
+[monitoring]
+log_level = "info"
+enable_metrics = true
+metrics_port = 9090
+enable_alerts = true
+
+[database]
+type = "sqlite"
+path = "./data/bot.db"
+# For PostgreSQL, use:
+# type = "postgresql"
+# url = "postgresql://user:password@localhost:5432/bsc_bot"
+
+[api]
+port = 3000
+enable_web_interface = false
+cors_enabled = true
+rate_limit_requests_per_minute = 100

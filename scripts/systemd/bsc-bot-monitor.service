@@ -1,0 +1,46 @@
+[Unit]
+Description=BSC Trading Bot Monitoring Service
+Documentation=https://github.com/your-username/bsc-bot
+After=network.target mysql.service redis.service bsc-bot-api.service
+Wants=mysql.service redis.service
+Requires=bsc-bot-api.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/bsc-bot
+ExecStart=/usr/bin/node dist/monitoring/monitor.js
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Environment
+Environment=NODE_ENV=production
+Environment=MONITOR_PORT=3001
+Environment=PROMETHEUS_PORT=9090
+EnvironmentFile=-/opt/bsc-bot/.env
+
+# Restart configuration
+Restart=always
+RestartSec=10
+StartLimitInterval=60s
+StartLimitBurst=3
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/bsc-bot/logs
+ReadWritePaths=/opt/bsc-bot/data
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bsc-bot-monitor
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

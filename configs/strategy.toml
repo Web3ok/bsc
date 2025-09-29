@@ -1,0 +1,44 @@
+# Strategy Configuration for BSC Market Maker Bot
+
+[grid_strategy]
+enabled = false
+grid_count = 10
+grid_spacing_percent = 1.0
+base_order_size_bnb = 0.1
+max_position_size_bnb = 5.0
+rebalance_threshold_percent = 10.0
+stop_loss_percent = 20.0
+take_profit_percent = 50.0
+
+[arbitrage_strategy]
+enabled = false
+min_profit_bps = 50  # 0.5%
+max_trade_size_bnb = 10.0
+max_slippage_percent = 2.0
+scan_interval_ms = 1000
+enable_cross_dex = false
+
+[market_making]
+enabled = false
+spread_bps = 50  # 0.5% spread
+order_refresh_interval_ms = 30000
+inventory_skew_enabled = true
+max_inventory_ratio = 0.8
+min_order_size_bnb = 0.01
+
+[risk_management]
+max_drawdown_percent = 15.0
+stop_all_on_loss_percent = 25.0
+daily_loss_limit_bnb = 50.0
+position_timeout_hours = 24
+emergency_liquidation_enabled = true
+
+[rebalancing]
+enabled = false
+target_allocation = [
+  { token = "BNB", percentage = 50.0 },
+  { token = "USDT", percentage = 30.0 },
+  { token = "ETH", percentage = 20.0 }
+]
+rebalance_interval_hours = 24
+rebalance_threshold_percent = 5.0

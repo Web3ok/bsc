@@ -1,0 +1,98 @@
+# Dependencies
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build outputs
+dist
+build
+
+# Development files
+src
+*.ts
+*.tsx
+tsconfig.json
+tsconfig.*.json
+
+# Testing
+coverage
+.nyc_output
+test-results
+*.test.*
+*.spec.*
+__tests__
+__mocks__
+
+# Environment and secrets
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+.env.*.local
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# CI/CD
+.github
+.circleci
+.travis.yml
+.gitlab-ci.yml
+
+# Documentation
+README.md
+CHANGELOG.md
+*.md
+docs/
+
+# Misc
+.eslintrc*
+.prettierrc*
+.editorconfig
+.husky
+.commitlint*
+
+# Runtime data
+data/
+wallets/
+*.sqlite
+*.db
+
+# Temporary files
+tmp/
+temp/
+.tmp

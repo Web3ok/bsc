@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
+!.env.example
+!.env.production.template
+
+# Build outputs
+dist/
+build/
+*.js.map
+*.d.ts
+!src/**/*.d.ts
+
+# Database
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Backups
+backups/
+*.backup
+*.bak
+emergency_*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+.temp_*
+
+# Private keys and wallets
+wallets/
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Archive (test scripts and old docs)
+archive/
+
+# OS Files
+Thumbs.db
+desktop.ini
+
+# PM2
+.pm2/
+pm2.log

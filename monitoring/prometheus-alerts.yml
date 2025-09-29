@@ -1,0 +1,233 @@
+# BSC Bot Prometheus Alerting Rules
+# Place this file in your Prometheus configuration directory
+# Add to prometheus.yml: rule_files: ["prometheus-alerts.yml"]
+
+groups:
+  - name: bsc-bot-critical
+    rules:
+      # System Health Alerts
+      - alert: BotSystemDown
+        expr: up{job="bsc-bot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: system
+        annotations:
+          summary: "BSC Bot system is completely down"
+          description: "Bot has been down for more than 1 minute - immediate action required"
+          runbook_url: "https://docs.company.com/runbooks/bsc-bot-down"
+
+      - alert: DatabaseConnectionLost
+        expr: bsc_bot_database_connected == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: database
+        annotations:
+          summary: "Database connection lost"
+          description: "Bot cannot connect to database for {{ $value }} seconds"
+          runbook_url: "https://docs.company.com/runbooks/database-issues"
+
+      - alert: WebSocketDisconnected
+        expr: bsc_bot_websocket_connected == 0
+        for: 2m
+        labels:
+          severity: high
+          service: websocket
+        annotations:
+          summary: "WebSocket connection lost"
+          description: "WebSocket has been disconnected for more than 2 minutes"
+          runbook_url: "https://docs.company.com/runbooks/websocket-issues"
+
+      # Trading Strategy Alerts
+      - alert: StrategyHighLoss
+        expr: bsc_bot_strategy_pnl_total < -5000
+        for: 5m
+        labels:
+          severity: high
+          service: strategy
+        annotations:
+          summary: "Strategy experiencing high losses"
+          description: "Total strategy PnL is {{ $value }} USD - exceeds loss threshold"
+          runbook_url: "https://docs.company.com/runbooks/strategy-losses"
+
+      - alert: EmergencyStopTriggered
+        expr: increase(bsc_bot_emergency_stops_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: critical
+          service: risk
+        annotations:
+          summary: "Emergency stop has been triggered"
+          description: "Risk management system has triggered emergency stop - all trading halted"
+          runbook_url: "https://docs.company.com/runbooks/emergency-stop"
+
+      # Portfolio Risk Alerts
+      - alert: PortfolioDrawdownCritical
+        expr: bsc_bot_portfolio_drawdown_pct > 20
+        for: 2m
+        labels:
+          severity: critical
+          service: risk
+        annotations:
+          summary: "Portfolio drawdown exceeds critical threshold"
+          description: "Current drawdown is {{ $value }}% - immediate risk assessment required"
+          runbook_url: "https://docs.company.com/runbooks/high-drawdown"
+
+      - alert: PositionRiskTooHigh
+        expr: max(bsc_bot_position_risk_score) > 90
+        for: 5m
+        labels:
+          severity: high
+          service: risk
+        annotations:
+          summary: "Position risk score exceeds safe threshold"
+          description: "Highest position risk score is {{ $value }} - consider position reduction"
+
+  - name: bsc-bot-warning
+    rules:
+      # Performance and System Warnings
+      - alert: HighErrorRate
+        expr: rate(bsc_bot_errors_total[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value }} per second over 10 minutes"
+
+      - alert: EventProcessingLag
+        expr: bsc_bot_event_processing_lag_seconds > 60
+        for: 5m
+        labels:
+          severity: warning
+          service: market_data
+        annotations:
+          summary: "Event processing is lagging"
+          description: "Processing delay is {{ $value }} seconds - may affect trading performance"
+
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / 1024 / 1024 / 1024) > 2
+        for: 15m
+        labels:
+          severity: warning
+          service: system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}GB - monitor for memory leaks"
+
+      - alert: APIResponseTimeSlow
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 10m
+        labels:
+          severity: warning
+          service: api
+        annotations:
+          summary: "API response times are slow"
+          description: "95th percentile response time is {{ $value }} seconds"
+
+      # Fund Management Warnings
+      - alert: LowGasBalanceMultiple
+        expr: bsc_bot_wallets_low_gas > 3
+        for: 15m
+        labels:
+          severity: warning
+          service: funds
+        annotations:
+          summary: "Multiple wallets have low gas balance"
+          description: "{{ $value }} wallets need gas top-up"
+
+      - alert: GasDripFailureRate
+        expr: rate(bsc_bot_gas_drip_failures_total[1h]) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+          service: funds
+        annotations:
+          summary: "High gas drip failure rate"
+          description: "Gas drip failure rate is {{ $value }} per second over 30 minutes"
+
+      - alert: SweeperInactive
+        expr: time() - bsc_bot_last_sweep_timestamp > 7200  # 2 hours
+        for: 0s
+        labels:
+          severity: warning
+          service: funds
+        annotations:
+          summary: "Balance sweeper has been inactive"
+          description: "No sweep operations for more than 2 hours"
+
+      # Strategy Performance Warnings
+      - alert: StrategyWinRateLow
+        expr: bsc_bot_strategy_win_rate < 0.4
+        for: 1h
+        labels:
+          severity: warning
+          service: strategy
+        annotations:
+          summary: "Strategy win rate is low"
+          description: "Win rate is {{ $value }} (40% threshold) over 1 hour"
+
+      - alert: TradingVolumeAnomalyLow
+        expr: rate(bsc_bot_trades_total[1h]) < 0.1
+        for: 2h
+        labels:
+          severity: warning
+          service: strategy
+        annotations:
+          summary: "Trading volume unusually low"
+          description: "Trade rate is {{ $value }} per second - check market conditions"
+
+      - alert: TradingVolumeAnomalyHigh
+        expr: rate(bsc_bot_trades_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          service: strategy
+        annotations:
+          summary: "Trading volume unusually high"
+          description: "Trade rate is {{ $value }} per second - possible market event"
+
+  - name: bsc-bot-info
+    rules:
+      # Informational Alerts
+      - alert: BotRestart
+        expr: increase(process_start_time_seconds[5m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          service: system
+        annotations:
+          summary: "Bot has been restarted"
+          description: "System restart detected at {{ $value }}"
+
+      - alert: StrategyConfigChange
+        expr: increase(bsc_bot_strategy_config_changes_total[1m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          service: strategy
+        annotations:
+          summary: "Strategy configuration has been modified"
+          description: "{{ $value }} strategy configuration changes detected"
+
+      - alert: NewTradingPair
+        expr: increase(bsc_bot_trading_pairs_total[5m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          service: market_data
+        annotations:
+          summary: "New trading pair detected"
+          description: "System now tracking {{ $value }} new trading pairs"
+
+      - alert: LargePositionOpened
+        expr: increase(bsc_bot_large_positions_total{size_usd=">10000"}[5m]) > 0
+        for: 0s
+        labels:
+          severity: info
+          service: strategy
+        annotations:
+          summary: "Large position opened"
+          description: "Position larger than $10,000 has been opened"

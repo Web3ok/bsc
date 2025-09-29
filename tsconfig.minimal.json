@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "src/config/**/*",
+    "src/utils/crypto.ts",
+    "src/utils/types.ts",
+    "src/types/**/*",
+    "src/wallet/manager.ts",
+    "src/wallet/index.ts",
+    "src/core-server.ts",
+    "src/cli/index.ts",
+    "src/cli/commands/wallet.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/api/**/*",
+    "src/cli/commands/backtest.ts",
+    "src/cli/commands/funds.ts",
+    "src/cli/commands/strategy.ts",
+    "src/dex/multi-dex-aggregator.ts",
+    "src/funds/**/*",
+    "src/risk/**/*",
+    "src/scripts/**/*",
+    "src/monitor/**/*"
+  ]
+}

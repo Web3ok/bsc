@@ -1,0 +1,44 @@
+export const BSC_CHAIN_ID = 56;
+export const BSC_TESTNET_CHAIN_ID = 97;
+
+export const BSC_MAINNET_ADDRESSES = {
+  WBNB: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+  PANCAKE_V2_ROUTER: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+  PANCAKE_V2_FACTORY: '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73',
+  PANCAKE_V3_ROUTER: '0x13f4EA83D0bd40E75C8222255bc855a974568Dd4',
+  USDT: '0x55d398326f99059fF775485246999027B3197955',
+  BUSD: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56',
+  USDC: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d',
+  CAKE: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82',
+} as const;
+
+export const BSC_TESTNET_ADDRESSES = {
+  WBNB: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd',
+  PANCAKE_V2_ROUTER: '0xD99D1c33F9fC3444f8101754aBC46c52416550D1',
+  PANCAKE_V2_FACTORY: '0x6725F303b657a9451d8BA641348b6761A6CC7a17',
+} as const;
+
+export const DEFAULT_GAS_SETTINGS = {
+  gasLimit: 200000n,
+  maxFeePerGas: 5000000000n, // 5 gwei
+  maxPriorityFeePerGas: 1000000000n, // 1 gwei
+} as const;
+
+export const DEFAULT_TRADING_SETTINGS = {
+  slippage: 0.005, // 0.5%
+  deadline: 20 * 60, // 20 minutes
+  minBnbBalance: 0.01,
+} as const;
+
+export const HD_WALLET_PATH = "m/44'/60'/0'/0";
+
+export const SUPPORTED_TOKENS = [
+  'BNB',
+  'WBNB',
+  'USDT',
+  'BUSD', 
+  'USDC',
+  'CAKE',
+] as const;
+
+export type SupportedToken = typeof SUPPORTED_TOKENS[number];
