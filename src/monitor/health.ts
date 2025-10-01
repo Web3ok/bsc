@@ -172,7 +172,7 @@ export class HealthMonitor {
       }
       
       return {
-        name: 'rpc_provider',
+        name: 'rpc_providers',
         status,
         latency: currentProvider?.latency || 0,
         metadata: {

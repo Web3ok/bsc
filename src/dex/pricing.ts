@@ -81,7 +81,8 @@ export class PricingService {
         tokenInInfo.address,
         tokenOutInfo.address,
         amountInWei,
-        amountOutWei
+        amountOutWei,
+        tokenInInfo.decimals
       );
 
       // Apply slippage
@@ -230,14 +231,15 @@ export class PricingService {
     tokenInAddress: string,
     tokenOutAddress: string,
     amountInWei: bigint,
-    amountOutWei: bigint
+    amountOutWei: bigint,
+    decimals: number = 18
   ): Promise<number> {
     try {
       // Simplified price impact calculation
       // In a real implementation, you'd compare against spot price
       // For now, return a basic estimate based on trade size
-      
-      const amountInEther = Number(formatUnits(amountInWei, 18));
+
+      const amountInEther = Number(formatUnits(amountInWei, decimals));
       
       // Basic heuristic: larger trades have higher price impact
       if (amountInEther > 100) return 0.03;      // 3%
