@@ -150,9 +150,10 @@ export default function SwapInterface() {
   });
   
   // Prepare swap transaction
+  // PancakeSwap Router uses ETH naming even on BSC
   const swapFunction = useMemo(() => {
-    if (tokenIn.symbol === 'BNB') return 'swapExactBNBForTokens';
-    if (tokenOut.symbol === 'BNB') return 'swapExactTokensForBNB';
+    if (tokenIn.symbol === 'BNB') return 'swapExactETHForTokens';
+    if (tokenOut.symbol === 'BNB') return 'swapExactTokensForETH';
     return 'swapExactTokensForTokens';
   }, [tokenIn, tokenOut]);
   

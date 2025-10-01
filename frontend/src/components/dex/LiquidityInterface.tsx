@@ -227,8 +227,9 @@ export default function LiquidityInterface() {
   });
   
   // Prepare add liquidity transaction
+  // PancakeSwap Router uses ETH naming even on BSC
   const addFunction = useMemo(() => {
-    if (tokenA.symbol === 'BNB' || tokenB.symbol === 'BNB') return 'addLiquidityBNB';
+    if (tokenA.symbol === 'BNB' || tokenB.symbol === 'BNB') return 'addLiquidityETH';
     return 'addLiquidity';
   }, [tokenA, tokenB]);
   
@@ -289,9 +290,10 @@ export default function LiquidityInterface() {
   });
   
   // Prepare remove liquidity transaction
+  // PancakeSwap Router uses ETH naming even on BSC
   const removeFunction = useMemo(() => {
     if (selectedPair?.token0.symbol === 'BNB' || selectedPair?.token1.symbol === 'BNB') {
-      return 'removeLiquidityBNB';
+      return 'removeLiquidityETH';
     }
     return 'removeLiquidity';
   }, [selectedPair]);
