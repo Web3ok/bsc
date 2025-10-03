@@ -1,472 +1,413 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { Card, CardBody, CardHeader, Button, Input, Divider, Modal, ModalContent, ModalHeader, ModalBody, useDisclosure, Chip, Spinner } from '@nextui-org/react';
-import { ArrowDown as ArrowDownIcon, Settings as CogIcon, CheckCircle as CheckCircleIcon, AlertCircle as ExclamationCircleIcon } from 'lucide-react';
-import { useAccount, useBalance, useContractRead, useContractWrite, usePrepareContractWrite, useWaitForTransaction, useNetwork } from 'wagmi';
-import { parseEther, formatEther, Address } from 'viem';
-import { CONTRACTS, ROUTER_ABI, ERC20_ABI, FACTORY_ABI } from '@/src/config/contracts';
+import { useState, useEffect } from 'react';
+import { Card, CardBody, Input, Button, Select, SelectItem } from '@nextui-org/react';
+import { ArrowDownUp, Settings, Info } from 'lucide-react';
+import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { parseUnits, formatUnits } from 'viem';
+import { bsc, bscTestnet } from 'wagmi/chains';
 
-interface Token {
-  symbol: string;
-  name: string;
-  address: Address;
-  decimals: number;
-  logoURI?: string;
-}
+// Network configurations
+const NETWORK_CONFIG = {
+  [bsc.id]: {
+    // BSC Mainnet
+    router: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+    wbnb: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+    tokens: [
+      { symbol: 'BNB', address: 'NATIVE', decimals: 18 },
+      { symbol: 'WBNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18 },
+      { symbol: 'USDT', address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+      { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', decimals: 18 },
+      { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
+    ]
+  },
+  [bscTestnet.id]: {
+    // BSC Testnet
+    router: '0xD99D1c33F9fC3444f8101754aBC46c52416550D1',
+    wbnb: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd',
+    tokens: [
+      { symbol: 'BNB', address: 'NATIVE', decimals: 18 },
+      { symbol: 'WBNB', address: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd', decimals: 18 },
+      { symbol: 'USDT', address: '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd', decimals: 18 },
+      { symbol: 'BUSD', address: '0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee', decimals: 18 },
+      { symbol: 'USDC', address: '0x64544969ed7EBf5f083679233325356EbE738930', decimals: 18 },
+    ]
+  }
+};
 
-const SUPPORTED_TOKENS: Token[] = [
-  { symbol: 'BNB', name: 'BNB', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'WBNB', name: 'Wrapped BNB', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'USDT', name: 'Tether USD', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'BUSD', name: 'Binance USD', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'CAKE', name: 'PancakeSwap Token', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-];
+// ERC20 ABI (minimal)
+const ERC20_ABI = [
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function',
+  },
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }, { name: '_spender', type: 'address' }],
+    name: 'allowance',
+    outputs: [{ name: '', type: 'uint256' }],
+    type: 'function',
+  },
+  {
+    constant: false,
+    inputs: [{ name: '_spender', type: 'address' }, { name: '_value', type: 'uint256' }],
+    name: 'approve',
+    outputs: [{ name: '', type: 'bool' }],
+    type: 'function',
+  },
+] as const;
 
-export default function SwapInterface() {
-  const { address, isConnected } = useAccount();
-  const { chain } = useNetwork();
-  const { isOpen: isSettingsOpen, onOpen: onOpenSettings, onClose: onCloseSettings } = useDisclosure();
-  const { isOpen: isTokenSelectOpen, onOpen: onOpenTokenSelect, onClose: onCloseTokenSelect } = useDisclosure();
-  
-  const [tokenIn, setTokenIn] = useState<Token>(SUPPORTED_TOKENS[0]);
-  const [tokenOut, setTokenOut] = useState<Token>(SUPPORTED_TOKENS[2]);
-  const [amountIn, setAmountIn] = useState('');
-  const [amountOut, setAmountOut] = useState('');
+// PancakeSwap Router ABI (minimal)
+const ROUTER_ABI = [
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'amountIn', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountOutMin', type: 'uint256' },
+      { internalType: 'address[]', name: 'path', type: 'address[]' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'swapExactTokensForTokens',
+    outputs: [{ internalType: 'uint256[]', name: 'amounts', type: 'uint256[]' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'amountOutMin', type: 'uint256' },
+      { internalType: 'address[]', name: 'path', type: 'address[]' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'swapExactETHForTokens',
+    outputs: [{ internalType: 'uint256[]', name: 'amounts', type: 'uint256[]' }],
+    stateMutability: 'payable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'amountIn', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountOutMin', type: 'uint256' },
+      { internalType: 'address[]', name: 'path', type: 'address[]' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'swapExactTokensForETH',
+    outputs: [{ internalType: 'uint256[]', name: 'amounts', type: 'uint256[]' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'amountIn', type: 'uint256' },
+      { internalType: 'address[]', name: 'path', type: 'address[]' },
+    ],
+    name: 'getAmountsOut',
+    outputs: [{ internalType: 'uint256[]', name: 'amounts', type: 'uint256[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export function SwapInterface() {
+  const { address, isConnected, chain } = useAccount();
+  const chainId = useChainId();
+
+  // Get network config based on current chain
+  const config = NETWORK_CONFIG[chainId as keyof typeof NETWORK_CONFIG] || NETWORK_CONFIG[bsc.id];
+  const ROUTER_ADDRESS = config.router;
+  const WBNB_ADDRESS = config.wbnb;
+  const COMMON_TOKENS = config.tokens;
+
+  const [fromToken, setFromToken] = useState(COMMON_TOKENS[0]);
+  const [toToken, setToToken] = useState(COMMON_TOKENS[2]);
+  const [fromAmount, setFromAmount] = useState('');
+  const [toAmount, setToAmount] = useState('');
   const [slippage, setSlippage] = useState('0.5');
-  const [deadline, setDeadline] = useState('20');
-  const [selectingTokenFor, setSelectingTokenFor] = useState<'in' | 'out'>('in');
   const [isApproving, setIsApproving] = useState(false);
   const [isSwapping, setIsSwapping] = useState(false);
-  
-  // Get network-specific contract addresses
-  const networkName = useMemo(() => {
-    if (chain?.id === 56) return 'bsc_mainnet';
-    if (chain?.id === 97) return 'bsc_testnet';
-    return 'localhost';
-  }, [chain]);
-  
-  const routerAddress = CONTRACTS[networkName as keyof typeof CONTRACTS]?.router as Address;
-  const wbnbAddress = CONTRACTS[networkName as keyof typeof CONTRACTS]?.wbnb as Address;
-  
-  // Update token addresses based on network
+
+  // Reset tokens when chain changes
   useEffect(() => {
-    const contracts = CONTRACTS[networkName as keyof typeof CONTRACTS];
-    if (contracts) {
-      SUPPORTED_TOKENS[1].address = contracts.wbnb as Address;
-      SUPPORTED_TOKENS[2].address = contracts.usdt as Address;
-      SUPPORTED_TOKENS[3].address = contracts.busd as Address;
-    }
-  }, [networkName]);
-  
-  // Get token balances
-  const { data: tokenInBalance } = useBalance({
+    setFromToken(COMMON_TOKENS[0]);
+    setToToken(COMMON_TOKENS[2]);
+    setFromAmount('');
+    setToAmount('');
+  }, [chainId]);
+
+  // Get balance
+  const { data: nativeBalance } = useBalance({ address });
+  const { data: tokenBalance } = useBalance({
     address,
-    token: tokenIn.symbol === 'BNB' ? undefined : tokenIn.address,
-    watch: true,
+    token: fromToken.address !== 'NATIVE' ? fromToken.address as `0x${string}` : undefined,
   });
-  
-  const { data: tokenOutBalance } = useBalance({
-    address,
-    token: tokenOut.symbol === 'BNB' ? undefined : tokenOut.address,
-    watch: true,
-  });
-  
-  // Get swap path
-  const swapPath = useMemo(() => {
-    if (!tokenIn || !tokenOut) return [];
-    
-    const path: Address[] = [];
-    
-    // Handle BNB conversions
-    const inAddress = tokenIn.symbol === 'BNB' ? wbnbAddress : tokenIn.address;
-    const outAddress = tokenOut.symbol === 'BNB' ? wbnbAddress : tokenOut.address;
-    
-    path.push(inAddress);
-    
-    // If not a direct pair, route through WBNB
-    if (tokenIn.symbol !== 'BNB' && tokenOut.symbol !== 'BNB' && 
-        tokenIn.symbol !== 'WBNB' && tokenOut.symbol !== 'WBNB') {
-      path.push(wbnbAddress);
-    }
-    
-    if (outAddress !== inAddress) {
-      path.push(outAddress);
-    }
-    
-    return path;
-  }, [tokenIn, tokenOut, wbnbAddress]);
-  
-  // Get output amount estimate
-  const { data: amountsOut } = useContractRead({
-    address: routerAddress,
-    abi: ROUTER_ABI,
-    functionName: 'getAmountsOut',
-    args: amountIn && swapPath.length >= 2 ? [parseEther(amountIn), swapPath] : undefined,
-    watch: true,
-    enabled: !!amountIn && Number(amountIn) > 0 && swapPath.length >= 2,
-  });
-  
-  // Update output amount when estimate changes
-  useEffect(() => {
-    if (amountsOut && Array.isArray(amountsOut)) {
-      const outputAmount = amountsOut[amountsOut.length - 1];
-      setAmountOut(formatEther(outputAmount as bigint));
-    }
-  }, [amountsOut]);
-  
-  // Check token allowance
-  const { data: tokenAllowance } = useContractRead({
-    address: tokenIn.address,
+
+  // Check allowance
+  const { data: allowance } = useReadContract({
+    address: fromToken.address !== 'NATIVE' ? fromToken.address as `0x${string}` : undefined,
     abi: ERC20_ABI,
     functionName: 'allowance',
-    args: address && routerAddress ? [address, routerAddress] : undefined,
-    watch: true,
-    enabled: tokenIn.symbol !== 'BNB' && !!address,
+    args: address && fromToken.address !== 'NATIVE' ? [address, ROUTER_ADDRESS] : undefined,
   });
-  
-  const needsApproval = useMemo(() => {
-    if (tokenIn.symbol === 'BNB') return false;
-    if (!tokenAllowance || !amountIn) return false;
-    return (tokenAllowance as bigint) < parseEther(amountIn);
-  }, [tokenAllowance, amountIn, tokenIn]);
-  
-  // Prepare approve transaction
-  const { config: approveConfig } = usePrepareContractWrite({
-    address: tokenIn.address,
-    abi: ERC20_ABI,
-    functionName: 'approve',
-    args: [routerAddress, parseEther(amountIn || '0')],
-    enabled: needsApproval && !!amountIn,
-  });
-  
-  const { write: approveWrite, data: approveData } = useContractWrite(approveConfig);
-  
-  const { isLoading: isApprovalPending } = useWaitForTransaction({
-    hash: approveData?.hash,
-    onSuccess: () => {
-      setIsApproving(false);
-    },
-  });
-  
-  // Prepare swap transaction
-  // PancakeSwap Router uses ETH naming even on BSC
-  const swapFunction = useMemo(() => {
-    if (tokenIn.symbol === 'BNB') return 'swapExactETHForTokens';
-    if (tokenOut.symbol === 'BNB') return 'swapExactTokensForETH';
-    return 'swapExactTokensForTokens';
-  }, [tokenIn, tokenOut]);
-  
-  const { config: swapConfig } = usePrepareContractWrite({
-    address: routerAddress,
+
+  // Get quote
+  const { data: amountsOut } = useReadContract({
+    address: ROUTER_ADDRESS as `0x${string}`,
     abi: ROUTER_ABI,
-    functionName: swapFunction,
-    args: (() => {
-      if (!amountIn || !amountOut || !address) return undefined;
-      
-      const minAmountOut = parseEther(amountOut) * BigInt(1000 - Number(slippage) * 10) / 1000n;
-      const deadlineTime = BigInt(Math.floor(Date.now() / 1000) + Number(deadline) * 60);
-      
-      if (tokenIn.symbol === 'BNB') {
-        return [minAmountOut, swapPath, address, deadlineTime];
-      } else {
-        return [parseEther(amountIn), minAmountOut, swapPath, address, deadlineTime];
-      }
-    })(),
-    value: tokenIn.symbol === 'BNB' ? parseEther(amountIn || '0') : undefined,
-    enabled: !needsApproval && !!amountIn && Number(amountIn) > 0 && !!amountOut,
+    functionName: 'getAmountsOut',
+    args: fromAmount && parseFloat(fromAmount) > 0 ? [
+      parseUnits(fromAmount, fromToken.decimals),
+      (fromToken.address === 'NATIVE'
+        ? [WBNB_ADDRESS as `0x${string}`, toToken.address as `0x${string}`]
+        : toToken.address === 'NATIVE'
+        ? [fromToken.address as `0x${string}`, WBNB_ADDRESS as `0x${string}`]
+        : [fromToken.address as `0x${string}`, WBNB_ADDRESS as `0x${string}`, toToken.address as `0x${string}`]) as readonly `0x${string}`[]
+    ] : undefined,
   });
-  
-  const { write: swapWrite, data: swapData } = useContractWrite(swapConfig);
-  
-  const { isLoading: isSwapPending, isSuccess: isSwapSuccess } = useWaitForTransaction({
-    hash: swapData?.hash,
-    onSuccess: () => {
+
+  // Write contracts
+  const { writeContract: approve, data: approveHash } = useWriteContract();
+  const { writeContract: swap, data: swapHash } = useWriteContract();
+
+  // Wait for transactions
+  const { isLoading: isApproveLoading } = useWaitForTransactionReceipt({ hash: approveHash });
+  const { isLoading: isSwapLoading } = useWaitForTransactionReceipt({ hash: swapHash });
+
+  // Update output amount when quote changes
+  useEffect(() => {
+    if (amountsOut && Array.isArray(amountsOut) && amountsOut.length > 0) {
+      const outputAmount = amountsOut[amountsOut.length - 1];
+      setToAmount(formatUnits(outputAmount, toToken.decimals));
+    }
+  }, [amountsOut, toToken.decimals]);
+
+  // Flip tokens
+  const handleFlip = () => {
+    const temp = fromToken;
+    setFromToken(toToken);
+    setToToken(temp);
+    setFromAmount(toAmount);
+    setToAmount('');
+  };
+
+  // Approve token
+  const handleApprove = async () => {
+    if (!address || fromToken.address === 'NATIVE') return;
+
+    setIsApproving(true);
+    try {
+      await approve({
+        address: fromToken.address as `0x${string}`,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [ROUTER_ADDRESS as `0x${string}`, parseUnits('1000000', fromToken.decimals)],
+      } as any);
+    } catch (error) {
+      console.error('Approve error:', error);
+    } finally {
+      setIsApproving(false);
+    }
+  };
+
+  // Execute swap
+  const handleSwap = async () => {
+    if (!address || !fromAmount || !toAmount) return;
+
+    setIsSwapping(true);
+    try {
+      const amountIn = parseUnits(fromAmount, fromToken.decimals);
+      const amountOutMin = parseUnits(
+        (parseFloat(toAmount) * (1 - parseFloat(slippage) / 100)).toFixed(toToken.decimals),
+        toToken.decimals
+      );
+      const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
+
+      if (fromToken.address === 'NATIVE') {
+        // BNB -> Token
+        await swap({
+          address: ROUTER_ADDRESS,
+          abi: ROUTER_ABI,
+          functionName: 'swapExactETHForTokens',
+          args: [amountOutMin, [WBNB_ADDRESS as `0x${string}`, toToken.address as `0x${string}`] as readonly `0x${string}`[], address, BigInt(deadline)],
+          value: amountIn,
+        } as any);
+      } else if (toToken.address === 'NATIVE') {
+        // Token -> BNB
+        await swap({
+          address: ROUTER_ADDRESS,
+          abi: ROUTER_ABI,
+          functionName: 'swapExactTokensForETH',
+          args: [amountIn, amountOutMin, [fromToken.address as `0x${string}`, WBNB_ADDRESS as `0x${string}`] as readonly `0x${string}`[], address, BigInt(deadline)],
+        } as any);
+      } else {
+        // Token -> Token
+        const path = [fromToken.address as `0x${string}`, WBNB_ADDRESS as `0x${string}`, toToken.address as `0x${string}`] as readonly `0x${string}`[];
+        await swap({
+          address: ROUTER_ADDRESS,
+          abi: ROUTER_ABI,
+          functionName: 'swapExactTokensForTokens',
+          args: [amountIn, amountOutMin, path, address, BigInt(deadline)],
+        } as any);
+      }
+    } catch (error) {
+      console.error('Swap error:', error);
+    } finally {
       setIsSwapping(false);
-      setAmountIn('');
-      setAmountOut('');
-    },
-  });
-  
-  const handleApprove = () => {
-    if (approveWrite) {
-      setIsApproving(true);
-      approveWrite();
     }
   };
-  
-  const handleSwap = () => {
-    if (swapWrite) {
-      setIsSwapping(true);
-      swapWrite();
-    }
-  };
-  
-  const handleTokenSwitch = () => {
-    setTokenIn(tokenOut);
-    setTokenOut(tokenIn);
-    setAmountIn('');
-    setAmountOut('');
-  };
-  
-  const handleTokenSelect = (token: Token) => {
-    if (selectingTokenFor === 'in') {
-      if (token.address === tokenOut.address) {
-        handleTokenSwitch();
-      } else {
-        setTokenIn(token);
-      }
-    } else {
-      if (token.address === tokenIn.address) {
-        handleTokenSwitch();
-      } else {
-        setTokenOut(token);
-      }
-    }
-    onCloseTokenSelect();
-  };
-  
-  const priceImpact = useMemo(() => {
-    if (!amountIn || !amountOut || Number(amountIn) === 0) return '0.00';
-    // Simplified price impact calculation
-    return '< 0.01';
-  }, [amountIn, amountOut]);
-  
+
+  // Check if needs approval
+  const needsApproval = fromToken.address !== 'NATIVE' &&
+    allowance !== undefined &&
+    fromAmount &&
+    parseFloat(fromAmount) > 0 &&
+    (allowance as bigint) < parseUnits(fromAmount, fromToken.decimals);
+
+  const currentBalance = fromToken.address === 'NATIVE' ? nativeBalance : tokenBalance;
+  const isInsufficientBalance = currentBalance && fromAmount &&
+    parseFloat(fromAmount) > parseFloat(formatUnits(currentBalance.value, fromToken.decimals));
+
   return (
-    <>
-      <Card className="max-w-md mx-auto">
-        <CardHeader className="flex justify-between items-center">
-          <h3 className="text-lg font-semibold">Swap</h3>
-          <Button
-            isIconOnly
-            variant="light"
-            size="sm"
-            onPress={onOpenSettings}
-          >
-            <CogIcon className="h-5 w-5" />
+    <Card className="max-w-md mx-auto">
+      <CardBody className="gap-4">
+        {/* Header */}
+        <div className="flex justify-between items-center">
+          <h3 className="text-xl font-bold">Swap Tokens</h3>
+          <Button isIconOnly variant="light" size="sm">
+            <Settings className="h-4 w-4" />
           </Button>
-        </CardHeader>
-        <CardBody className="gap-4">
-          {/* From Token */}
-          <div className="bg-default-100 rounded-xl p-4">
-            <div className="flex justify-between mb-2">
-              <span className="text-sm text-default-500">From</span>
-              <span className="text-sm text-default-500">
-                Balance: {tokenInBalance ? Number(tokenInBalance.formatted).toFixed(4) : '0.0000'}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                placeholder="0.0"
-                value={amountIn}
-                onValueChange={setAmountIn}
-                variant="bordered"
-                classNames={{
-                  input: "text-xl",
-                  inputWrapper: "border-none bg-transparent",
-                }}
-              />
-              <Button
-                variant="flat"
-                onPress={() => {
-                  setSelectingTokenFor('in');
-                  onOpenTokenSelect();
-                }}
-                className="min-w-[100px]"
-              >
-                {tokenIn.symbol}
-              </Button>
-            </div>
-            <Button
-              size="sm"
-              variant="light"
-              onPress={() => setAmountIn(tokenInBalance?.formatted || '')}
-              className="mt-2"
-            >
-              MAX
-            </Button>
+        </div>
+
+        {/* From Token */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-default-500">From</span>
+            <span className="text-default-500">
+              Balance: {currentBalance ? parseFloat(formatUnits(currentBalance.value, fromToken.decimals)).toFixed(4) : '0.0000'}
+            </span>
           </div>
-          
-          {/* Swap Direction Button */}
-          <div className="flex justify-center">
-            <Button
-              isIconOnly
-              variant="light"
-              onPress={handleTokenSwitch}
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              placeholder="0.0"
+              value={fromAmount}
+              onChange={(e) => setFromAmount(e.target.value)}
+              classNames={{ input: 'text-2xl' }}
+            />
+            <Select
+              selectedKeys={[fromToken.symbol]}
+              onChange={(e) => {
+                const token = COMMON_TOKENS.find(t => t.symbol === e.target.value);
+                if (token) setFromToken(token);
+              }}
+              className="w-32"
             >
-              <ArrowDownIcon className="h-5 w-5" />
-            </Button>
+              {COMMON_TOKENS.map((token) => (
+                <SelectItem key={token.symbol} value={token.symbol}>
+                  {token.symbol}
+                </SelectItem>
+              ))}
+            </Select>
           </div>
-          
-          {/* To Token */}
-          <div className="bg-default-100 rounded-xl p-4">
-            <div className="flex justify-between mb-2">
-              <span className="text-sm text-default-500">To</span>
-              <span className="text-sm text-default-500">
-                Balance: {tokenOutBalance ? Number(tokenOutBalance.formatted).toFixed(4) : '0.0000'}
-              </span>
-            </div>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                placeholder="0.0"
-                value={amountOut}
-                isReadOnly
-                variant="bordered"
-                classNames={{
-                  input: "text-xl",
-                  inputWrapper: "border-none bg-transparent",
-                }}
-              />
-              <Button
-                variant="flat"
-                onPress={() => {
-                  setSelectingTokenFor('out');
-                  onOpenTokenSelect();
-                }}
-                className="min-w-[100px]"
-              >
-                {tokenOut.symbol}
-              </Button>
-            </div>
+        </div>
+
+        {/* Flip Button */}
+        <div className="flex justify-center">
+          <Button isIconOnly variant="bordered" size="sm" onClick={handleFlip}>
+            <ArrowDownUp className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {/* To Token */}
+        <div className="space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-default-500">To</span>
           </div>
-          
-          {/* Price Info */}
-          {amountIn && amountOut && Number(amountIn) > 0 && (
-            <div className="bg-default-50 rounded-lg p-3 space-y-1 text-sm">
-              <div className="flex justify-between">
-                <span className="text-default-500">Price</span>
-                <span>1 {tokenIn.symbol} = {(Number(amountOut) / Number(amountIn)).toFixed(6)} {tokenOut.symbol}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-default-500">Price Impact</span>
-                <span className="text-success">{priceImpact}%</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-default-500">Route</span>
-                <span>{swapPath.length > 2 ? `${tokenIn.symbol} → WBNB → ${tokenOut.symbol}` : `${tokenIn.symbol} → ${tokenOut.symbol}`}</span>
-              </div>
-            </div>
-          )}
-          
-          {/* Action Button */}
-          {!isConnected ? (
-            <Button color="primary" size="lg" isDisabled>
-              Connect Wallet
-            </Button>
-          ) : needsApproval ? (
-            <Button
-              color="primary"
-              size="lg"
-              onPress={handleApprove}
-              isLoading={isApproving || isApprovalPending}
+          <div className="flex gap-2">
+            <Input
+              type="number"
+              placeholder="0.0"
+              value={toAmount}
+              isReadOnly
+              classNames={{ input: 'text-2xl' }}
+            />
+            <Select
+              selectedKeys={[toToken.symbol]}
+              onChange={(e) => {
+                const token = COMMON_TOKENS.find(t => t.symbol === e.target.value);
+                if (token) setToToken(token);
+              }}
+              className="w-32"
             >
-              Approve {tokenIn.symbol}
-            </Button>
-          ) : (
-            <Button
-              color="primary"
-              size="lg"
-              onPress={handleSwap}
-              isDisabled={!swapWrite || !amountIn || Number(amountIn) === 0}
-              isLoading={isSwapping || isSwapPending}
-            >
-              {!amountIn || Number(amountIn) === 0 
-                ? 'Enter Amount' 
-                : `Swap ${tokenIn.symbol} for ${tokenOut.symbol}`}
-            </Button>
-          )}
-          
-          {/* Transaction Status */}
-          {isSwapSuccess && (
-            <Chip
-              startContent={<CheckCircleIcon className="h-4 w-4" />}
-              color="success"
-              variant="flat"
-            >
-              Swap Successful!
-            </Chip>
-          )}
-        </CardBody>
-      </Card>
-      
-      {/* Settings Modal */}
-      <Modal isOpen={isSettingsOpen} onClose={onCloseSettings} size="sm">
-        <ModalContent>
-          <ModalHeader>Transaction Settings</ModalHeader>
-          <ModalBody className="gap-4 pb-6">
-            <div>
-              <label className="text-sm text-default-500">
-                Slippage Tolerance (%)
-              </label>
-              <div className="flex gap-2 mt-2">
-                {['0.1', '0.5', '1.0'].map(value => (
-                  <Button
-                    key={value}
-                    size="sm"
-                    variant={slippage === value ? 'solid' : 'flat'}
-                    onPress={() => setSlippage(value)}
-                  >
-                    {value}%
-                  </Button>
-                ))}
-                <Input
-                  type="number"
-                  size="sm"
-                  value={slippage}
-                  onValueChange={setSlippage}
-                  endContent={<span className="text-default-500">%</span>}
-                  className="w-24"
-                />
-              </div>
-            </div>
-            <div>
-              <label className="text-sm text-default-500">
-                Transaction Deadline (minutes)
-              </label>
-              <Input
-                type="number"
-                size="sm"
-                value={deadline}
-                onValueChange={setDeadline}
-                className="mt-2"
-              />
-            </div>
-          </ModalBody>
-        </ModalContent>
-      </Modal>
-      
-      {/* Token Selection Modal */}
-      <Modal isOpen={isTokenSelectOpen} onClose={onCloseTokenSelect} size="sm">
-        <ModalContent>
-          <ModalHeader>Select Token</ModalHeader>
-          <ModalBody className="gap-2 pb-6">
-            {SUPPORTED_TOKENS.map(token => (
-              <Button
-                key={token.symbol}
-                variant="flat"
-                onPress={() => handleTokenSelect(token)}
-                className="justify-start"
-                isDisabled={
-                  (selectingTokenFor === 'in' && token.address === tokenOut.address) ||
-                  (selectingTokenFor === 'out' && token.address === tokenIn.address)
-                }
-              >
-                <div className="flex items-center gap-3 w-full">
-                  <div className="w-8 h-8 rounded-full bg-default-200 flex items-center justify-center">
-                    {token.symbol.charAt(0)}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="font-medium">{token.symbol}</div>
-                    <div className="text-xs text-default-500">{token.name}</div>
-                  </div>
-                </div>
-              </Button>
-            ))}
-          </ModalBody>
-        </ModalContent>
-      </Modal>
-    </>
+              {COMMON_TOKENS.map((token) => (
+                <SelectItem key={token.symbol} value={token.symbol}>
+                  {token.symbol}
+                </SelectItem>
+              ))}
+            </Select>
+          </div>
+        </div>
+
+        {/* Slippage */}
+        <div className="flex items-center gap-2 text-sm text-default-500">
+          <Info className="h-4 w-4" />
+          <span>Slippage Tolerance:</span>
+          <Input
+            type="number"
+            value={slippage}
+            onChange={(e) => setSlippage(e.target.value)}
+            size="sm"
+            className="w-20"
+            endContent="%"
+          />
+        </div>
+
+        {/* Action Buttons */}
+        {!isConnected ? (
+          <Button color="primary" size="lg" fullWidth disabled>
+            Connect Wallet First
+          </Button>
+        ) : chain?.id !== bsc.id ? (
+          <Button color="warning" size="lg" fullWidth disabled>
+            Switch to BSC Mainnet
+          </Button>
+        ) : isInsufficientBalance ? (
+          <Button color="danger" size="lg" fullWidth disabled>
+            Insufficient {fromToken.symbol} Balance
+          </Button>
+        ) : needsApproval ? (
+          <Button
+            color="primary"
+            size="lg"
+            fullWidth
+            onClick={handleApprove}
+            isLoading={isApproving || isApproveLoading}
+          >
+            Approve {fromToken.symbol}
+          </Button>
+        ) : (
+          <Button
+            color="success"
+            size="lg"
+            fullWidth
+            onClick={handleSwap}
+            isLoading={isSwapping || isSwapLoading}
+            isDisabled={!fromAmount || !toAmount || parseFloat(fromAmount) <= 0}
+          >
+            Swap
+          </Button>
+        )}
+
+        {/* Price Info */}
+        {toAmount && fromAmount && parseFloat(fromAmount) > 0 && (
+          <div className="text-sm text-default-500 text-center">
+            1 {fromToken.symbol} ≈ {(parseFloat(toAmount) / parseFloat(fromAmount)).toFixed(6)} {toToken.symbol}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }

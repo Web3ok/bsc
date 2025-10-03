@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
-import { body, param, query, validationResult } from 'express-validator';
-import { MultiDEXAggregator, BatchTradeRequest, DEXType } from '../dex/multi-dex-aggregator';
+import { body, query, validationResult } from 'express-validator';
+import { MultiDEXAggregator, BatchTradeRequest } from '../dex/multi-dex-aggregator';
 import { BatchWalletManager } from '../wallet/batch-wallet-manager';
 import { WalletManager } from '../wallet';
 import { logger } from '../utils/logger';
@@ -282,6 +282,7 @@ export class BatchTradingAPI {
       const tempFile = `/tmp/wallet_import_${Date.now()}.csv`;
       const csvContent = [
         'privateKey,alias,tags',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ...wallets.map((w: any) => `${w.privateKey},${w.alias || ''},${w.tags?.join('|') || ''}`)
       ].join('\n');
 
@@ -349,7 +350,7 @@ export class BatchTradingAPI {
 
       // CSV export
       const tempFile = `/tmp/wallet_export_${Date.now()}.csv`;
-      const result = await this.batchWalletManager.exportWalletsToCSV(tempFile, options);
+      await this.batchWalletManager.exportWalletsToCSV(tempFile, options);
 
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename=wallets_export.csv');
@@ -374,7 +375,7 @@ export class BatchTradingAPI {
     if (this.handleValidationErrors(req, res)) return;
 
     try {
-      const { addresses, confirmation } = req.body;
+      const { addresses } = req.body;
 
       const result = await this.batchWalletManager.deleteWallets(addresses);
 

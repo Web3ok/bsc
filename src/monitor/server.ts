@@ -101,6 +101,10 @@ export class MonitoringServer {
         await this.handleStatus(res);
       } else if (url === '/prometheus' && method === 'GET') {
         await this.handlePrometheusMetrics(res);
+      } else if (url === '/biandex/stats' && method === 'GET') {
+        await this.handleBianDEXStats(res);
+      } else if (url === '/biandex/pools' && method === 'GET') {
+        await this.handleBianDEXPools(res);
       } else {
         this.handle404(res);
       }
@@ -207,11 +211,37 @@ export class MonitoringServer {
     }
   }
 
+  private async handleBianDEXStats(res: http.ServerResponse): Promise<void> {
+    try {
+      const { biandexMonitor } = await import('../services/biandex-monitor');
+      const stats = await biandexMonitor.getStats();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(stats, null, 2));
+    } catch (error) {
+      logger.error({ error }, 'Failed to get BianDEX stats');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get BianDEX stats' }));
+    }
+  }
+
+  private async handleBianDEXPools(res: http.ServerResponse): Promise<void> {
+    try {
+      const { biandexMonitor } = await import('../services/biandex-monitor');
+      const pools = await biandexMonitor.getAllPools();
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(pools, null, 2));
+    } catch (error) {
+      logger.error({ error }, 'Failed to get BianDEX pools');
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to get BianDEX pools' }));
+    }
+  }
+
   private handle404(res: http.ServerResponse): void {
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       error: 'Not Found',
-      available_endpoints: ['/health', '/healthz', '/metrics', '/status', '/prometheus'],
+      available_endpoints: ['/health', '/healthz', '/metrics', '/status', '/prometheus', '/biandex/stats', '/biandex/pools'],
     }));
   }
 

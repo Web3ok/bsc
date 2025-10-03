@@ -1,144 +1,133 @@
 #!/bin/bash
 
+# ==========================================
 # BSC Trading Bot - Health Check Script
+# ==========================================
+#
+# This script performs comprehensive health checks
+#
+# Usage:
+#   ./scripts/health-check.sh
+#
+# Exit codes:
+#   0 - All checks passed
+#   1 - One or more checks failed
+# ==========================================
 
-# Colors for output
-RED='\033[0;31m'
+set -e
+
+# Colors
 GREEN='\033[0;32m'
+RED='\033[0;31m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-PORT=${PORT:-10001}
+PASSED=0
+FAILED=0
 
-echo "🏥 BSC Trading Bot Health Check"
+print_pass() {
+    echo -e "${GREEN}✅ PASS${NC}: $1"
+    PASSED=$((PASSED + 1))
+}
+
+print_fail() {
+    echo -e "${RED}❌ FAIL${NC}: $1"
+    FAILED=$((FAILED + 1))
+}
+
+print_warn() {
+    echo -e "${YELLOW}⚠️  WARN${NC}: $1"
+}
+
+echo "========================================"
+echo "  BSC Trading Bot - Health Check"
 echo "========================================"
 echo ""
 
-# Function to check service
-check_service() {
-    local name=$1
-    local url=$2
-    local expected=$3
-    
-    if curl -s "$url" | grep -q "$expected" 2>/dev/null; then
-        echo -e "${GREEN}✅ $name: Healthy${NC}"
-        return 0
-    else
-        echo -e "${RED}❌ $name: Not responding${NC}"
-        return 1
-    fi
-}
-
-# Function to check port
-check_port() {
-    local name=$1
-    local port=$2
-    
-    if lsof -i:$port > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ $name (port $port): Active${NC}"
-        return 0
-    else
-        echo -e "${YELLOW}⚠️  $name (port $port): Inactive${NC}"
-        return 1
-    fi
-}
-
-# Check API Server
-echo "📡 API Server Status:"
-if check_service "Health Endpoint" "http://localhost:$PORT/api/health" "healthy"; then
-    # Get detailed health info
-    HEALTH_DATA=$(curl -s http://localhost:$PORT/api/health)
-    echo -e "  ${BLUE}Version:${NC} $(echo $HEALTH_DATA | grep -oP '"version":"\K[^"]*' || echo 'N/A')"
-    echo -e "  ${BLUE}Uptime:${NC} $(echo $HEALTH_DATA | grep -oP '"uptime":\K[0-9]*' || echo '0')s"
+# Check 1: Backend API
+echo "🔍 Checking backend API..."
+if curl -f -s http://localhost:10001/api/dashboard/status > /dev/null; then
+    print_pass "Backend API is responding"
+else
+    print_fail "Backend API is not responding"
 fi
 
-echo ""
-echo "🔌 Port Status:"
-check_port "API Server" $PORT
-check_port "Frontend Dev" 10002
-check_port "Frontend Alt 1" 10003
-check_port "Frontend Alt 2" 10004
+# Check 2: Frontend
+echo "🔍 Checking frontend..."
+if curl -f -s http://localhost:10002 > /dev/null; then
+    print_pass "Frontend is responding"
+else
+    print_fail "Frontend is not responding"
+fi
 
-echo ""
-echo "🗄️  Database Status:"
+# Check 3: WebSocket
+echo "🔍 Checking WebSocket..."
+if curl -f -s http://localhost:10001 > /dev/null; then
+    print_pass "WebSocket endpoint is accessible"
+else
+    print_fail "WebSocket endpoint is not accessible"
+fi
+
+# Check 4: Database
+echo "🔍 Checking database..."
 if [ -f "./data/bot.db" ]; then
-    SIZE=$(du -h ./data/bot.db | cut -f1)
-    echo -e "${GREEN}✅ Database exists (${SIZE})${NC}"
-    
-    # Check table count
-    TABLE_COUNT=$(sqlite3 ./data/bot.db "SELECT COUNT(*) FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "0")
-    echo -e "  ${BLUE}Tables:${NC} $TABLE_COUNT"
+    print_pass "Database file exists"
 else
-    echo -e "${RED}❌ Database not found${NC}"
+    print_warn "Database file not found (may not be initialized yet)"
 fi
 
-echo ""
-echo "📊 Service Endpoints:"
-echo "  - API Health: http://localhost:$PORT/api/health"
-echo "  - API Prices: http://localhost:$PORT/api/prices/BNB"
-echo "  - API Trading History: http://localhost:$PORT/api/trading/history"
-echo "  - WebSocket: ws://localhost:$PORT"
-
-echo ""
-echo "🔑 Authentication:"
-if [ ! -z "$JWT_SECRET" ] && [ "$JWT_SECRET" != "dev-secret-key-for-testing-only-256bits-long" ]; then
-    echo -e "${GREEN}✅ Production JWT secret configured${NC}"
-else
-    echo -e "${YELLOW}⚠️  Using development JWT secret${NC}"
-fi
-
-echo ""
-echo "📁 Log Files:"
-if [ -d "logs" ]; then
-    echo "  Log directory exists with $(ls -1 logs/*.log 2>/dev/null | wc -l) log files"
+# Check 5: Environment variables
+echo "🔍 Checking environment..."
+if [ -f ".env" ]; then
+    print_pass ".env file exists"
     
-    # Show recent errors if any
-    if [ -f "logs/api-server.log" ]; then
-        ERROR_COUNT=$(grep -c ERROR logs/api-server.log 2>/dev/null || echo "0")
-        if [ "$ERROR_COUNT" -gt 0 ]; then
-            echo -e "  ${YELLOW}⚠️  Found $ERROR_COUNT errors in API server log${NC}"
-        fi
+    if grep -q "dev-secret-key-for-testing-only" .env; then
+        print_warn "Using development JWT_SECRET"
+    fi
+    
+    if grep -q "NODE_ENV=production" .env; then
+        print_pass "Running in production mode"
+    else
+        print_warn "Running in development mode"
     fi
 else
-    echo -e "${YELLOW}⚠️  Log directory not found${NC}"
+    print_fail ".env file not found"
 fi
 
-echo ""
-echo "🔍 Process Status:"
-ps aux | grep -E "node.*server|npm.*server" | grep -v grep > /dev/null 2>&1
-if [ $? -eq 0 ]; then
-    echo -e "${GREEN}✅ Server processes running${NC}"
-    ps aux | grep -E "node.*server|npm.*server" | grep -v grep | head -3 | while read line; do
-        PID=$(echo $line | awk '{print $2}')
-        CMD=$(echo $line | awk '{for(i=11;i<=NF;i++) printf "%s ", $i; print ""}')
-        echo -e "  ${BLUE}PID $PID:${NC} ${CMD:0:60}..."
-    done
+# Check 6: Disk space
+echo "🔍 Checking disk space..."
+DISK_USAGE=$(df -h . | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ "$DISK_USAGE" -lt 90 ]; then
+    print_pass "Disk space is sufficient ($DISK_USAGE% used)"
 else
-    echo -e "${RED}❌ No server processes found${NC}"
+    print_fail "Disk space is running low ($DISK_USAGE% used)"
 fi
 
+# Check 7: PM2 processes
+echo "🔍 Checking PM2 processes..."
+if command -v pm2 &> /dev/null; then
+    if pm2 list | grep -q "online"; then
+        print_pass "PM2 processes are running"
+    else
+        print_warn "PM2 is installed but no processes are running"
+    fi
+else
+    print_warn "PM2 is not installed"
+fi
+
+# Summary
 echo ""
 echo "========================================"
-
-# Overall status
-OVERALL_STATUS=0
-
-# Check critical services
-curl -s http://localhost:$PORT/api/health | grep -q "healthy" 2>/dev/null || OVERALL_STATUS=1
-
-if [ $OVERALL_STATUS -eq 0 ]; then
-    echo -e "${GREEN}✅ System Status: HEALTHY${NC}"
-else
-    echo -e "${RED}❌ System Status: DEGRADED${NC}"
-    echo ""
-    echo "🔧 Troubleshooting:"
-    echo "  1. Check if services are running: ./scripts/start-all.sh"
-    echo "  2. Check logs: tail -f logs/api-server.log"
-    echo "  3. Check environment: cat .env"
-    echo "  4. Run tests: npm test"
-fi
-
+echo "  Health Check Summary"
 echo "========================================"
+echo -e "Passed: ${GREEN}$PASSED${NC}"
+echo -e "Failed: ${RED}$FAILED${NC}"
+echo ""
 
-exit $OVERALL_STATUS
+if [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}🎉 All checks passed!${NC}"
+    exit 0
+else
+    echo -e "${RED}⚠️  Some checks failed. Please review the issues above.${NC}"
+    exit 1
+fi

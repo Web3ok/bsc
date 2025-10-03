@@ -79,14 +79,14 @@ const POPULAR_TOKENS = [
 ];
 
 export default function TradingPage() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'advanced' | 'history'>('single');
   
   // Single trade state
   const [singleTrade, setSingleTrade] = useState<TradeRequest>({
     type: 'buy',
-    tokenIn: POPULAR_TOKENS[0].address,
-    tokenOut: POPULAR_TOKENS[1].address,
+    tokenIn: '',
+    tokenOut: '',
     amount: '',
     slippage: 0.5,
     walletAddress: ''
@@ -122,6 +122,7 @@ export default function TradingPage() {
     fetchTradeHistory();
     fetchWalletGroups();
     fetchAvailableWallets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -219,7 +220,7 @@ export default function TradingPage() {
       if (result.success) {
         const wallets = result.data.wallets.map((wallet: any) => ({
           address: wallet.address,
-          label: wallet.label || `钱包 ${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`
+          label: wallet.label || `${t('common.wallet')} ${wallet.address.slice(0, 6)}...${wallet.address.slice(-4)}`
         }));
         setAvailableWallets(wallets);
         if (wallets.length > 0 && !selectedWallet) {
@@ -248,21 +249,34 @@ export default function TradingPage() {
   };
 
   const handleGetQuote = async () => {
+    // 详细的前端验证
     if (!singleTrade.tokenIn) {
-      toast.error('Please select a token to buy');
+      toast.error(t('trading.pleaseSelectTokenIn') || 'Please select input token');
       return;
     }
     if (!singleTrade.tokenOut) {
-      toast.error('Please select a token to sell');
+      toast.error(t('trading.pleaseSelectTokenOut') || 'Please select output token');
       return;
     }
     if (!singleTrade.amount || singleTrade.amount.trim() === '') {
-      toast.error('Please enter an amount');
+      toast.error(t('trading.pleaseEnterAmount') || 'Please enter an amount');
       return;
     }
+
     const amount = parseFloat(singleTrade.amount);
     if (Number.isNaN(amount) || amount <= 0) {
-      toast.error('Please enter a valid numeric amount greater than 0');
+      toast.error(t('trading.enterValidAmount') || 'Please enter a valid numeric amount greater than 0');
+      return;
+    }
+
+    // 验证地址格式
+    const addressPattern = /^0x[a-fA-F0-9]{40}$/;
+    if (singleTrade.tokenIn.toUpperCase() !== 'BNB' && !addressPattern.test(singleTrade.tokenIn)) {
+      toast.error(t('trading.invalidTokenInAddress') || 'Invalid token input address format. Must be "BNB" or valid contract address (0x...)');
+      return;
+    }
+    if (singleTrade.tokenOut.toUpperCase() !== 'BNB' && !addressPattern.test(singleTrade.tokenOut)) {
+      toast.error(t('trading.invalidTokenOutAddress') || 'Invalid token output address format. Must be "BNB" or valid contract address (0x...)');
       return;
     }
 
@@ -278,26 +292,62 @@ export default function TradingPage() {
           slippage: singleTrade.slippage
         })
       });
-      
+
       const result = await response.json();
       if (result.success) {
         setQuote(result.data);
-        toast.success('Quote generated successfully');
+        toast.success(t('trading.quoteGeneratedSuccess') || 'Quote generated successfully! ✅');
       } else {
-        toast.error(result.error || 'Failed to get quote');
+        // 显示详细的错误信息
+        const errorMessage = result.message || result.error || 'Failed to get quote';
+        toast.error(`${t('trading.quoteFailed') || 'Quote Failed'}: ${errorMessage}`, {
+          duration: 5000,
+          style: {
+            maxWidth: '500px'
+          }
+        });
       }
     } catch (error) {
       console.error('Quote request failed:', error);
-      toast.error('Failed to get quote');
+      const errorMsg = error instanceof Error ? error.message : 'Network error';
+      toast.error(`${t('trading.networkError') || 'Network Error'}: ${errorMsg}`, {
+        duration: 5000
+      });
     } finally {
       setLoading(false);
     }
   };
 
   const handleExecuteTrade = async () => {
-    if (!quote || (!singleTrade.walletAddress && !singleTrade.walletGroup)) {
-      toast.error('Please specify a wallet address or group');
+    // 详细的表单验证with清晰的错误提示
+    if (!singleTrade.tokenIn) {
+      toast.error(t('trading.pleaseSelectTokenIn') || 'Please select input token');
       return;
+    }
+    if (!singleTrade.tokenOut) {
+      toast.error(t('trading.pleaseSelectTokenOut') || 'Please select output token');
+      return;
+    }
+    if (!singleTrade.amount) {
+      toast.error(t('trading.pleaseEnterAmount') || 'Please enter amount');
+      return;
+    }
+    if (!quote) {
+      toast.error(t('trading.pleaseGetQuoteFirst') || 'Please get a quote first before executing trade');
+      return;
+    }
+    if (!singleTrade.walletAddress && !singleTrade.walletGroup) {
+      toast.error(t('trading.pleaseSpecifyWallet') || 'Please specify wallet address or select a wallet group');
+      return;
+    }
+
+    // 验证钱包地址格式
+    if (singleTrade.walletAddress) {
+      const addressPattern = /^0x[a-fA-F0-9]{40}$/;
+      if (!addressPattern.test(singleTrade.walletAddress)) {
+        toast.error(t('trading.invalidWalletAddress') || 'Invalid wallet address format. Must be a valid Ethereum address (0x...)');
+        return;
+      }
     }
 
     setLoading(true);
@@ -310,19 +360,32 @@ export default function TradingPage() {
           quote
         })
       });
-      
+
       const result = await response.json();
       if (result.success) {
-        toast.success('Trade executed successfully!');
+        toast.success(t('trading.tradeExecutedSuccess') || '✅ Trade executed successfully!', {
+          duration: 4000,
+          icon: '🎉'
+        });
         setQuote(null);
         setSingleTrade({ ...singleTrade, amount: '' });
         fetchTradeHistory();
       } else {
-        toast.error(result.error || 'Trade execution failed');
+        // 显示详细的错误信息
+        const errorMessage = result.message || result.error || 'Trade execution failed';
+        toast.error(`${t('trading.executionFailed') || 'Execution Failed'}: ${errorMessage}`, {
+          duration: 6000,
+          style: {
+            maxWidth: '500px'
+          }
+        });
       }
     } catch (error) {
       console.error('Trade execution failed:', error);
-      toast.error('Trade execution failed');
+      const errorMsg = error instanceof Error ? error.message : 'Network error';
+      toast.error(`${t('trading.networkError') || 'Network Error'}: ${errorMsg}`, {
+        duration: 5000
+      });
     } finally {
       setLoading(false);
     }
@@ -396,9 +459,9 @@ export default function TradingPage() {
       setSingleTrade({ ...singleTrade, tokenIn: customTokenInAddress });
       setCustomTokenInAddress('');
       setShowCustomTokenIn(false);
-      toast.success('自定义代币已添加');
+      toast.success(t('common.customTokenAdded'));
     } else {
-      toast.error('请输入有效的合约地址');
+      toast.error(t('common.enterValidContractAddress'));
     }
   };
 
@@ -407,9 +470,9 @@ export default function TradingPage() {
       setSingleTrade({ ...singleTrade, tokenOut: customTokenOutAddress });
       setCustomTokenOutAddress('');
       setShowCustomTokenOut(false);
-      toast.success('自定义代币已添加');
+      toast.success(t('common.customTokenAdded'));
     } else {
-      toast.error('请输入有效的合约地址');
+      toast.error(t('common.enterValidContractAddress'));
     }
   };
 
@@ -437,7 +500,7 @@ export default function TradingPage() {
         <button
           className={`px-2 sm:px-4 py-2 rounded text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
             activeTab === 'single' 
-              ? 'bg-white text-blue-600 shadow-sm' 
+              ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
               : 'text-gray-600 hover:text-gray-900'
           }`}
           onClick={() => setActiveTab('single')}
@@ -447,7 +510,7 @@ export default function TradingPage() {
         <button
           className={`px-2 sm:px-4 py-2 rounded text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
             activeTab === 'batch' 
-              ? 'bg-white text-blue-600 shadow-sm' 
+              ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
               : 'text-gray-600 hover:text-gray-900'
           }`}
           onClick={() => setActiveTab('batch')}
@@ -457,7 +520,7 @@ export default function TradingPage() {
         <button
           className={`px-2 sm:px-4 py-2 rounded text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
             activeTab === 'advanced' 
-              ? 'bg-white text-blue-600 shadow-sm' 
+              ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
               : 'text-gray-600 hover:text-gray-900'
           }`}
           onClick={() => setActiveTab('advanced')}
@@ -467,7 +530,7 @@ export default function TradingPage() {
         <button
           className={`px-2 sm:px-4 py-2 rounded text-xs sm:text-sm font-medium transition-colors whitespace-nowrap ${
             activeTab === 'history' 
-              ? 'bg-white text-blue-600 shadow-sm' 
+              ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' 
               : 'text-gray-600 hover:text-gray-900'
           }`}
           onClick={() => setActiveTab('history')}
@@ -509,37 +572,68 @@ export default function TradingPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <Select
-                  label={t('trading.tokenIn')}
-                  selectedKeys={[singleTrade.tokenIn]}
-                  onSelectionChange={(keys) => setSingleTrade({ ...singleTrade, tokenIn: Array.from(keys)[0] as string })}
-                >
-                  {POPULAR_TOKENS.map((token) => (
-                    <SelectItem key={token.address} value={token.address} textValue={`${token.symbol} - ${token.name}`}>
-                      {token.symbol} - {token.name}
-                    </SelectItem>
-                  ))}
-                </Select>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{t('trading.tokenIn')} ({t('trading.payToken')}) *</label>
+                  <Input
+                    placeholder={t('trading.inputTokenPlaceholder')}
+                    value={singleTrade.tokenIn}
+                    onChange={(e) => setSingleTrade({ ...singleTrade, tokenIn: e.target.value })}
+                    description={`${t('trading.inputTokenDescription')} (${language === 'zh' ? '例: WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c' : 'e.g.: WBNB = 0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c'})`}
+                    color={!singleTrade.tokenIn ? "danger" : "default"}
+                    isRequired
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-xs text-gray-500">{t('trading.quickSelect')}</span>
+                    {POPULAR_TOKENS.slice(0, 4).map((token) => (
+                      <Button
+                        key={token.address}
+                        size="sm"
+                        variant="flat"
+                        className="h-6 px-2 text-xs"
+                        onPress={() => setSingleTrade({ ...singleTrade, tokenIn: token.address })}
+                      >
+                        {token.symbol}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
 
-                <Select
-                  label={t('trading.tokenOut')}
-                  selectedKeys={[singleTrade.tokenOut]}
-                  onSelectionChange={(keys) => setSingleTrade({ ...singleTrade, tokenOut: Array.from(keys)[0] as string })}
-                >
-                  {POPULAR_TOKENS.map((token) => (
-                    <SelectItem key={token.address} value={token.address} textValue={`${token.symbol} - ${token.name}`}>
-                      {token.symbol} - {token.name}
-                    </SelectItem>
-                  ))}
-                </Select>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{t('trading.tokenOut')} ({t('trading.receiveToken')}) *</label>
+                  <Input
+                    placeholder={t('trading.outputTokenPlaceholder')}
+                    value={singleTrade.tokenOut}
+                    onChange={(e) => setSingleTrade({ ...singleTrade, tokenOut: e.target.value })}
+                    description={`${t('trading.outputTokenDescription')} (${language === 'zh' ? '例: CAKE = 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82' : 'e.g.: CAKE = 0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82'})`}
+                    color={!singleTrade.tokenOut ? "danger" : "default"}
+                    isRequired
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-xs text-gray-500">{t('trading.quickSelect')}</span>
+                    {POPULAR_TOKENS.slice(0, 4).map((token) => (
+                      <Button
+                        key={token.address}
+                        size="sm"
+                        variant="flat"
+                        className="h-6 px-2 text-xs"
+                        onPress={() => setSingleTrade({ ...singleTrade, tokenOut: token.address })}
+                      >
+                        {token.symbol}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <Input
-                label={t('trading.amount')}
-                placeholder="1.0"
+                label={`${t('trading.amount')} (${t('trading.tradeAmount')}) *`}
+                placeholder={t('trading.amountPlaceholder')}
                 value={singleTrade.amount}
                 onChange={(e) => setSingleTrade({ ...singleTrade, amount: e.target.value })}
-                endContent={<span className="text-sm text-gray-500">{getTokenSymbol(singleTrade.tokenIn)}</span>}
+                description={t('trading.amountDescription')}
+                endContent={<span className="text-sm text-gray-500">{getTokenSymbol(singleTrade.tokenIn) || 'Token'}</span>}
+                isRequired
+                color={!singleTrade.amount ? "danger" : "default"}
               />
 
               <Input
@@ -611,18 +705,18 @@ export default function TradingPage() {
             <CardBody className="p-4 sm:p-6">
               {quote ? (
                 <div className="space-y-4">
-                  <div className="bg-gray-50 p-3 sm:p-4 rounded-lg space-y-2">
+                  <div className="bg-gray-50 dark:bg-gray-800 p-3 sm:p-4 rounded-lg space-y-2">
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-600">{t('trading.youPay')}</span>
-                      <span className="font-mono">{quote.tokenIn.amount} {quote.tokenIn.symbol}</span>
+                      <span className="font-mono">{quote.tokenIn?.amount ? `${quote.tokenIn.amount} ${quote.tokenIn.symbol || ''}` : '--'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-600">{t('trading.youReceive')}</span>
-                      <span className="font-mono">{quote.tokenOut.amount} {quote.tokenOut.symbol}</span>
+                      <span className="font-mono">{quote.tokenOut?.amount ? `${quote.tokenOut.amount} ${quote.tokenOut.symbol || ''}` : '--'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm text-gray-600">{t('trading.price')}</span>
-                      <span className="font-mono">{quote.executionPrice}</span>
+                      <span className="font-mono">{quote.executionPrice || t('common.noData')}</span>
                     </div>
                   </div>
 
@@ -631,40 +725,47 @@ export default function TradingPage() {
                       <span className="text-sm">{t('trading.priceImpact')}</span>
                       <Chip 
                         size="sm"
-                        color={quote.priceImpact.impact < 1 ? 'success' : quote.priceImpact.impact < 3 ? 'warning' : 'danger'}
+                        color={quote.priceImpact?.impact < 1 ? 'success' : quote.priceImpact?.impact < 3 ? 'warning' : 'danger'}
                       >
-                        {quote.priceImpact.impact.toFixed(3)}% ({quote.priceImpact.category})
+                        {quote.priceImpact?.impact ? `${quote.priceImpact.impact.toFixed(3)}% (${quote.priceImpact.category})` : t('common.noData')}
                       </Chip>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">{t('trading.recommendedSlippage')}</span>
-                      <span className="text-sm">{quote.slippageAnalysis.recommendedSlippage.toFixed(2)}%</span>
+                      <span className="text-sm">{quote.slippageAnalysis?.recommendedSlippage?.toFixed(2) || '0.50'}%</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">{t('trading.minimumReceived')}</span>
-                      <span className="text-sm font-mono">{quote.minimumReceived} {quote.tokenOut.symbol}</span>
+                      <span className="text-sm font-mono">{quote.minimumReceived ? `${quote.minimumReceived} ${quote.tokenOut?.symbol || ''}` : '--'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">{t('trading.gasEstimate')}</span>
-                      <span className="text-sm">{quote.gasEstimate} gwei</span>
+                      <span className="text-sm">{quote.gasEstimate ? `${quote.gasEstimate} gwei` : '--'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-sm">{t('trading.totalCost')}</span>
-                      <span className="text-sm font-mono">{quote.totalCostBNB} BNB</span>
+                      <span className="text-sm font-mono">{quote.totalCostBNB ? `${quote.totalCostBNB} BNB` : '--'}</span>
                     </div>
                   </div>
 
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                    <div className="flex items-start gap-2">
-                      <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
-                      <p className="text-sm text-blue-700">{quote.recommendation}</p>
+                  {quote.recommendation && (
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                        <p className="text-sm text-blue-700 dark:text-blue-300">{quote.recommendation}</p>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <BarChart3 className="h-12 w-12 mx-auto mb-4" />
-                  <p>{t('trading.clickGetQuote')}</p>
+                <div className="text-center py-8">
+                  <BarChart3 className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                  <p className="text-gray-600 dark:text-gray-400 font-medium mb-2">
+                    {t('common.noQuoteAvailable')}
+                  </p>
+                  <p className="text-sm text-gray-500 dark:text-gray-500">
+                    {t('common.enterInfoFirst')}
+                  </p>
                 </div>
               )}
             </CardBody>
@@ -760,7 +861,7 @@ export default function TradingPage() {
                       <h4 className="font-medium mb-2">{t('trading.recentTrades')}:</h4>
                       <div className="space-y-2 max-h-24 sm:max-h-32 overflow-y-auto">
                         {batchTrades.slice(-5).map((trade, index) => (
-                          <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm bg-gray-50 p-2 rounded">
+                          <div key={index} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm bg-gray-50 dark:bg-gray-800 p-2 rounded">
                             <span className={`font-medium ${trade.type === 'buy' ? 'text-green-600' : 'text-red-600'}`}>
                               {trade.type.toUpperCase()}
                             </span>
@@ -873,7 +974,7 @@ export default function TradingPage() {
           <ModalHeader>{t('trading.batchTradePreview')}</ModalHeader>
           <ModalBody>
             <div className="space-y-4">
-              <div className="bg-gray-50 p-3 sm:p-4 rounded-lg">
+              <div className="bg-gray-50 dark:bg-gray-800 p-3 sm:p-4 rounded-lg">
                 <h4 className="font-medium mb-2">Configuration</h4>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 text-sm">
                   <div>

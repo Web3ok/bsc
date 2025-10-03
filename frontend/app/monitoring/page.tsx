@@ -71,6 +71,7 @@ export default function MonitoringPage() {
     fetchMonitoringData();
     const interval = setInterval(fetchMonitoringData, 30000); // Update every 30 seconds
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchMonitoringData = async () => {

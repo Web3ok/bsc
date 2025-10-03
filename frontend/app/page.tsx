@@ -5,6 +5,8 @@ import { Button, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter } from
 import { Activity, TrendingUp, Wallet, Shield, RefreshCw, Monitor, AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useAccount, useBalance } from 'wagmi';
+import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 interface DashboardData {
   system: {
@@ -34,9 +36,11 @@ export default function Dashboard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [showAlertModal, setShowAlertModal] = useState(false);
   const refreshInterval = useRef<NodeJS.Timeout | null>(null);
-  
+
   const { connected, lastMessage, sendMessage } = useWebSocket();
   const { t } = useLanguage();
+  const { address, isConnected } = useAccount();
+  const { data: balance } = useBalance({ address });
 
   // Auto-refresh functionality
   const startAutoRefresh = useCallback(() => {
@@ -50,13 +54,14 @@ export default function Dashboard() {
         fetchSystemStatus();
       }
     }, 15000); // Refresh every 15 seconds
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRefresh]);
 
   // Fetch initial data
   useEffect(() => {
     fetchDashboardData();
     fetchSystemStatus();
-    
+
     if (connected) {
       sendMessage({
         type: 'subscribe',
@@ -73,27 +78,52 @@ export default function Dashboard() {
         clearInterval(refreshInterval.current);
       }
     };
-  }, [connected, autoRefresh, startAutoRefresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, autoRefresh]);
 
   const fetchDashboardData = async () => {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10001';
-      console.log('Fetching from:', `${apiUrl}/api/dashboard/overview`);
-      const response = await fetch(`${apiUrl}/api/dashboard/overview`);
+      if (process.env.NODE_ENV === 'development') {
+        console.log('Fetching from:', `${apiUrl}/api/dashboard/overview`);
+      }
+      const response = await fetch(`${apiUrl}/api/dashboard/overview`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      // 检查HTTP状态码
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
       const result = await response.json();
-      
+
       if (result.success) {
         setDashboardData(result.data);
         setApiStatus(`✅ ${t('dashboard.connected')}`);
         setLastRefresh(new Date());
       } else {
         setApiStatus('❌ API Error');
-        checkForAlerts({ type: 'api_error', message: 'Dashboard API returned error' });
+        const errorMsg = result.message || result.error || 'Dashboard API returned error';
+        if (process.env.NODE_ENV === 'development') {
+          console.warn('API returned error:', errorMsg);
+        }
+        checkForAlerts({ type: 'api_error', message: errorMsg });
       }
     } catch (error) {
-      console.error('Failed to fetch dashboard data:', error);
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to fetch dashboard data:', error);
+      }
       setApiStatus(`❌ ${t('dashboard.disconnected')}`);
-      checkForAlerts({ type: 'connection_error', message: 'Failed to connect to API', error: error.message });
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      checkForAlerts({
+        type: 'connection_error',
+        message: `Failed to connect to API: ${errorMsg}`,
+        error: errorMsg
+      });
     }
   };
 
@@ -102,21 +132,29 @@ export default function Dashboard() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10001';
       const response = await fetch(`${apiUrl}/api/dashboard/status`);
       const result = await response.json();
-      
+
       if (result.success) {
         setSystemStatus(result.data);
         checkSystemHealth(result.data);
       }
     } catch (error) {
-      console.error('Failed to fetch system status:', error);
-      checkForAlerts({ type: 'system_error', message: 'Failed to fetch system status', error: error.message });
+      if (process.env.NODE_ENV === 'development') {
+        console.error('Failed to fetch system status:', error);
+      }
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      checkForAlerts({ type: 'system_error', message: 'Failed to fetch system status', error: errorMsg });
     }
   };
 
   const checkSystemHealth = (status: any) => {
     const newAlerts: any[] = [];
 
-    // Check overall system health
+    // In development mode, don't create alerts for expected conditions
+    if (process.env.NODE_ENV === 'development') {
+      return; // Skip alert generation in development
+    }
+
+    // Check overall system health (only in production)
     if (status.overall === 'degraded') {
       newAlerts.push({
         id: `system-degraded-${Date.now()}`,
@@ -126,33 +164,35 @@ export default function Dashboard() {
         timestamp: new Date(),
         severity: 'medium'
       });
-    } else if (status.overall === 'unhealthy') {
+    } else if (status.overall === 'unhealthy' && status.emergency_status?.active) {
+      // Only show critical alert if there's an actual emergency
       newAlerts.push({
         id: `system-unhealthy-${Date.now()}`,
         type: 'error',
         title: 'System Health Critical',
-        message: 'System is experiencing critical issues',
+        message: status.emergency_status?.reason || 'System is experiencing critical issues',
         timestamp: new Date(),
         severity: 'high'
       });
     }
 
-    // Check RPC latency
-    if (status.components?.rpc_provider?.latency > 1000) {
+    // Check RPC latency (only alert for very high latency)
+    if (status.components?.rpc_provider?.latency > 2000) {
       newAlerts.push({
         id: `rpc-latency-${Date.now()}`,
         type: 'warning',
         title: 'High RPC Latency Detected',
-        message: `RPC latency is ${status.components.rpc_provider.latency}ms (threshold: 1000ms)`,
+        message: `RPC latency is ${status.components.rpc_provider.latency}ms (threshold: 2000ms)`,
         timestamp: new Date(),
         severity: 'medium'
       });
     }
 
-    // Check component health
+    // Check component health (be less aggressive about alerts)
     if (status.components) {
       Object.entries(status.components).forEach(([component, data]: [string, any]) => {
-        if (data.status === 'unhealthy') {
+        // Only alert for truly critical failures, not degraded status
+        if (data.status === 'unhealthy' && component !== 'database') {
           newAlerts.push({
             id: `component-${component}-${Date.now()}`,
             type: 'error',
@@ -204,6 +244,31 @@ export default function Dashboard() {
           <p className="text-base sm:text-lg text-gray-600 dark:text-gray-300">{t('dashboard.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+          {/* Web3 Wallet Balance (if connected) */}
+          {isConnected && balance && (
+            <div className="hidden md:flex items-center gap-2 px-3 py-2 bg-gradient-to-r from-purple-100 to-blue-100 dark:from-purple-900 dark:to-blue-900 rounded-lg border-2 border-purple-200 dark:border-purple-700">
+              <Wallet className="h-4 w-4 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-800 dark:text-purple-200">
+                {Number(balance.formatted).toFixed(4)} {balance.symbol}
+              </span>
+            </div>
+          )}
+
+          {/* Connect Wallet Button */}
+          <div className="scale-90 sm:scale-100">
+            <ConnectButton
+              chainStatus="icon"
+              accountStatus={{
+                smallScreen: 'avatar',
+                largeScreen: 'full',
+              }}
+              showBalance={{
+                smallScreen: false,
+                largeScreen: true,
+              }}
+            />
+          </div>
+
           {/* Alerts Badge */}
           {alerts.length > 0 && (
             <Button
@@ -235,7 +300,7 @@ export default function Dashboard() {
             onPress={toggleAutoRefresh}
             className="min-w-20"
           >
-            {autoRefresh ? 'Auto' : 'Manual'}
+            {autoRefresh ? t('dashboard.autoRefresh') : t('dashboard.manualRefresh')}
           </Button>
           
           <Button 
@@ -243,7 +308,7 @@ export default function Dashboard() {
             variant="bordered" 
             onPress={() => { fetchDashboardData(); fetchSystemStatus(); }}
             isIconOnly
-            className="border-2 hover:bg-blue-50"
+            className="border-2 hover:bg-blue-50 dark:hover:bg-gray-700"
             aria-label={t('dashboard.refresh')}
           >
             <RefreshCw className="h-4 w-4" />
@@ -251,7 +316,7 @@ export default function Dashboard() {
           
           {lastRefresh && (
             <span className="text-xs text-gray-500 dark:text-gray-400 hidden lg:block">
-              Last: {lastRefresh.toLocaleTimeString()}
+              {t('dashboard.lastRefresh')}: {lastRefresh.toLocaleTimeString()}
             </span>
           )}
         </div>
@@ -357,8 +422,8 @@ export default function Dashboard() {
                       component.latency > 1000 ? 'text-red-500' : 
                       component.latency > 500 ? 'text-yellow-500' : 'text-green-500'
                     }`}>
-                      延迟: {component.latency}ms
-                      {component.latency > 890 && " (高延迟检测)"}
+                      {t('common.latency')}: {component.latency}ms
+                      {component.latency > 890 && ` (${t('common.highLatencyDetected')})`}
                     </span>
                   )}
                 </div>
@@ -440,14 +505,14 @@ export default function Dashboard() {
               <ModalHeader className="flex flex-col gap-1">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="h-5 w-5 text-yellow-600" />
-                  System Alerts ({alerts.length})
+                  {t('dashboard.systemAlerts')} ({alerts.length})
                 </div>
               </ModalHeader>
               <ModalBody>
                 {alerts.length === 0 ? (
                   <div className="text-center py-8 text-gray-500">
                     <CheckCircle2 className="h-12 w-12 mx-auto mb-4 text-green-500" />
-                    <p>No active alerts</p>
+                    <p>{t('monitoring.noActiveAlerts')}</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -496,10 +561,10 @@ export default function Dashboard() {
               </ModalBody>
               <ModalFooter>
                 <Button color="danger" variant="light" onPress={clearAlerts}>
-                  Clear All
+                  {t('dashboard.clearAll')}
                 </Button>
                 <Button color="primary" onPress={onClose}>
-                  Close
+                  {t('common.close')}
                 </Button>
               </ModalFooter>
             </>

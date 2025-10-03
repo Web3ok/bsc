@@ -2,26 +2,16 @@
 
 import { NextUIProvider } from '@nextui-org/react';
 import { ThemeProvider as NextThemesProvider } from 'next-themes';
-import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
-import React, { useState } from 'react';
+import React from 'react';
 import { WebSocketProvider } from '../contexts/WebSocketContext';
 import { LanguageProvider } from '../contexts/LanguageContext';
+import { Web3Provider } from '../src/providers/Web3Provider';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: {
-      queries: {
-        retry: 2,
-        staleTime: 5 * 60 * 1000,
-        cacheTime: 10 * 60 * 1000,
-      },
-    },
-  }));
-
   return (
-    <QueryClientProvider client={queryClient}>
-      <LanguageProvider>
+    <LanguageProvider>
+      <Web3Provider>
         <NextUIProvider>
           <NextThemesProvider attribute="class" defaultTheme="light" themes={['light', 'dark']}>
             <WebSocketProvider>
@@ -30,8 +20,8 @@ export default function Providers({ children }: { children: React.ReactNode }) {
             </WebSocketProvider>
           </NextThemesProvider>
         </NextUIProvider>
-      </LanguageProvider>
-    </QueryClientProvider>
+      </Web3Provider>
+    </LanguageProvider>
   );
 }
 

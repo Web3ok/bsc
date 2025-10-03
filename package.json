@@ -35,7 +35,12 @@
     "deploy:pm2": "./scripts/deploy-production.sh --method=pm2",
     "deploy:systemd": "./scripts/deploy-production.sh --method=systemd",
     "deploy:quick": "./scripts/deploy-production.sh --method=pm2 --skip-migrate",
-    "test:smoke": "vitest run tests/smoke"
+    "test:smoke": "vitest run tests/smoke",
+    "start:bot": "ENABLE_BIANDEX=false ENABLE_TRADING_BOT=true node dist/server.js",
+    "start:dex": "ENABLE_BIANDEX=true ENABLE_TRADING_BOT=false node dist/server.js",
+    "start:full": "ENABLE_BIANDEX=true ENABLE_TRADING_BOT=true node dist/server.js",
+    "dev:bot": "ENABLE_BIANDEX=false ENABLE_TRADING_BOT=true PORT=10001 npx tsx src/server.ts",
+    "dev:dex": "ENABLE_BIANDEX=true ENABLE_TRADING_BOT=false PORT=10003 npx tsx src/server.ts"
   },
   "keywords": [
     "bsc",
@@ -49,6 +54,8 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.0",
+    "@openzeppelin/contracts": "^5.4.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.5.2",
     "@types/node-fetch": "^2.6.13",
@@ -57,6 +64,7 @@
     "@typescript-eslint/eslint-plugin": "^8.44.1",
     "@typescript-eslint/parser": "^8.44.1",
     "eslint": "^9.36.0",
+    "hardhat": "^3.0.6",
     "prettier": "^3.6.2",
     "sinon": "^21.0.0",
     "supertest": "^7.1.4",

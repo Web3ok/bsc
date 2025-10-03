@@ -1,690 +1,514 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { Card, CardBody, CardHeader, Button, Input, Divider, Modal, ModalContent, ModalHeader, ModalBody, useDisclosure, Chip, Progress, Tabs, Tab } from '@nextui-org/react';
-import { Plus as PlusIcon, Minus as MinusIcon, Settings as CogIcon } from 'lucide-react';
-import { useAccount, useBalance, useContractRead, useContractWrite, usePrepareContractWrite, useWaitForTransaction, useNetwork } from 'wagmi';
-import { parseEther, formatEther, Address } from 'viem';
-import { CONTRACTS, ROUTER_ABI, ERC20_ABI, FACTORY_ABI, PAIR_ABI } from '@/src/config/contracts';
+import { useState, useEffect } from 'react';
+import { Card, CardBody, Input, Button, Select, SelectItem, Tabs, Tab } from '@nextui-org/react';
+import { Plus, Minus, Info } from 'lucide-react';
+import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt, useChainId } from 'wagmi';
+import { parseUnits, formatUnits, Address } from 'viem';
+import { bsc, bscTestnet } from 'wagmi/chains';
 
-interface Token {
-  symbol: string;
-  name: string;
-  address: Address;
-  decimals: number;
-  logoURI?: string;
-}
+// Network configurations
+const NETWORK_CONFIG = {
+  [bsc.id]: {
+    // BSC Mainnet
+    router: '0x10ED43C718714eb63d5aA57B78B54704E256024E',
+    factory: '0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73',
+    wbnb: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c',
+    tokens: [
+      { symbol: 'BNB', address: 'NATIVE', decimals: 18 },
+      { symbol: 'WBNB', address: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', decimals: 18 },
+      { symbol: 'USDT', address: '0x55d398326f99059fF775485246999027B3197955', decimals: 18 },
+      { symbol: 'BUSD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', decimals: 18 },
+      { symbol: 'USDC', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', decimals: 18 },
+    ]
+  },
+  [bscTestnet.id]: {
+    // BSC Testnet
+    router: '0xD99D1c33F9fC3444f8101754aBC46c52416550D1',
+    factory: '0x6725F303b657a9451d8BA641348b6761A6CC7a17',
+    wbnb: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd',
+    tokens: [
+      { symbol: 'BNB', address: 'NATIVE', decimals: 18 },
+      { symbol: 'WBNB', address: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd', decimals: 18 },
+      { symbol: 'USDT', address: '0x337610d27c682E347C9cD60BD4b3b107C9d34dDd', decimals: 18 },
+      { symbol: 'BUSD', address: '0xeD24FC36d5Ee211Ea25A80239Fb8C4Cfd80f12Ee', decimals: 18 },
+      { symbol: 'USDC', address: '0x64544969ed7EBf5f083679233325356EbE738930', decimals: 18 },
+    ]
+  }
+};
 
-interface LiquidityPair {
-  token0: Token;
-  token1: Token;
-  pairAddress: Address;
-  balance: string;
-  reserve0: string;
-  reserve1: string;
-  totalSupply: string;
-  sharePercent: string;
-}
+// ERC20 ABI (minimal)
+const ERC20_ABI = [
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function',
+  },
+  {
+    constant: false,
+    inputs: [{ name: '_spender', type: 'address' }, { name: '_value', type: 'uint256' }],
+    name: 'approve',
+    outputs: [{ name: '', type: 'bool' }],
+    type: 'function',
+  },
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }, { name: '_spender', type: 'address' }],
+    name: 'allowance',
+    outputs: [{ name: '', type: 'uint256' }],
+    type: 'function',
+  },
+] as const;
 
-const SUPPORTED_TOKENS: Token[] = [
-  { symbol: 'BNB', name: 'BNB', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'WBNB', name: 'Wrapped BNB', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'USDT', name: 'Tether USD', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'BUSD', name: 'Binance USD', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-  { symbol: 'CAKE', name: 'PancakeSwap Token', address: '0x0000000000000000000000000000000000000000' as Address, decimals: 18 },
-];
+// PancakeSwap Router ABI (minimal for liquidity)
+const ROUTER_ABI = [
+  {
+    inputs: [
+      { internalType: 'address', name: 'tokenA', type: 'address' },
+      { internalType: 'address', name: 'tokenB', type: 'address' },
+      { internalType: 'uint256', name: 'amountADesired', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountBDesired', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountAMin', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountBMin', type: 'uint256' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'addLiquidity',
+    outputs: [
+      { internalType: 'uint256', name: 'amountA', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountB', type: 'uint256' },
+      { internalType: 'uint256', name: 'liquidity', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'token', type: 'address' },
+      { internalType: 'uint256', name: 'amountTokenDesired', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountTokenMin', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountETHMin', type: 'uint256' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'addLiquidityETH',
+    outputs: [
+      { internalType: 'uint256', name: 'amountToken', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountETH', type: 'uint256' },
+      { internalType: 'uint256', name: 'liquidity', type: 'uint256' },
+    ],
+    stateMutability: 'payable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'address', name: 'tokenA', type: 'address' },
+      { internalType: 'address', name: 'tokenB', type: 'address' },
+      { internalType: 'uint256', name: 'liquidity', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountAMin', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountBMin', type: 'uint256' },
+      { internalType: 'address', name: 'to', type: 'address' },
+      { internalType: 'uint256', name: 'deadline', type: 'uint256' },
+    ],
+    name: 'removeLiquidity',
+    outputs: [
+      { internalType: 'uint256', name: 'amountA', type: 'uint256' },
+      { internalType: 'uint256', name: 'amountB', type: 'uint256' },
+    ],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+] as const;
 
-export default function LiquidityInterface() {
-  const { address, isConnected } = useAccount();
-  const { chain } = useNetwork();
-  const { isOpen: isTokenSelectOpen, onOpen: onOpenTokenSelect, onClose: onCloseTokenSelect } = useDisclosure();
-  
-  const [activeTab, setActiveTab] = useState('add');
-  const [tokenA, setTokenA] = useState<Token>(SUPPORTED_TOKENS[0]);
-  const [tokenB, setTokenB] = useState<Token>(SUPPORTED_TOKENS[2]);
+// Factory ABI (to get pair address)
+const FACTORY_ABI = [
+  {
+    constant: true,
+    inputs: [
+      { internalType: 'address', name: 'tokenA', type: 'address' },
+      { internalType: 'address', name: 'tokenB', type: 'address' },
+    ],
+    name: 'getPair',
+    outputs: [{ internalType: 'address', name: 'pair', type: 'address' }],
+    type: 'function',
+  },
+] as const;
+
+// Pair ABI (to get reserves and LP balance)
+const PAIR_ABI = [
+  {
+    constant: true,
+    inputs: [],
+    name: 'getReserves',
+    outputs: [
+      { internalType: 'uint112', name: 'reserve0', type: 'uint112' },
+      { internalType: 'uint112', name: 'reserve1', type: 'uint112' },
+      { internalType: 'uint32', name: 'blockTimestampLast', type: 'uint32' },
+    ],
+    type: 'function',
+  },
+  {
+    constant: true,
+    inputs: [{ name: '_owner', type: 'address' }],
+    name: 'balanceOf',
+    outputs: [{ name: 'balance', type: 'uint256' }],
+    type: 'function',
+  },
+  {
+    constant: true,
+    inputs: [],
+    name: 'totalSupply',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    type: 'function',
+  },
+] as const;
+
+export function LiquidityInterface() {
+  const { address, isConnected, chain } = useAccount();
+  const chainId = useChainId();
+
+  // Get network config based on current chain
+  const config = NETWORK_CONFIG[chainId as keyof typeof NETWORK_CONFIG] || NETWORK_CONFIG[bsc.id];
+  const ROUTER_ADDRESS = config.router;
+  const FACTORY_ADDRESS = config.factory;
+  const WBNB_ADDRESS = config.wbnb;
+  const COMMON_TOKENS = config.tokens;
+
+  const [activeTab, setActiveTab] = useState<'add' | 'remove'>('add');
+  const [tokenA, setTokenA] = useState(COMMON_TOKENS[0]);
+  const [tokenB, setTokenB] = useState(COMMON_TOKENS[2]);
   const [amountA, setAmountA] = useState('');
   const [amountB, setAmountB] = useState('');
-  const [liquidityAmount, setLiquidityAmount] = useState('');
-  const [removePercent, setRemovePercent] = useState('50');
-  const [selectingTokenFor, setSelectingTokenFor] = useState<'A' | 'B'>('A');
-  const [userPairs, setUserPairs] = useState<LiquidityPair[]>([]);
-  const [selectedPair, setSelectedPair] = useState<LiquidityPair | null>(null);
-  const [deadline, setDeadline] = useState('20');
-  const [isApproving, setIsApproving] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  
-  // Get network-specific contract addresses
-  const networkName = useMemo(() => {
-    if (chain?.id === 56) return 'bsc_mainnet';
-    if (chain?.id === 97) return 'bsc_testnet';
-    return 'localhost';
-  }, [chain]);
-  
-  const routerAddress = CONTRACTS[networkName as keyof typeof CONTRACTS]?.router as Address;
-  const factoryAddress = CONTRACTS[networkName as keyof typeof CONTRACTS]?.factory as Address;
-  const wbnbAddress = CONTRACTS[networkName as keyof typeof CONTRACTS]?.wbnb as Address;
-  
-  // Update token addresses based on network
+  const [slippage, setSlippage] = useState('0.5');
+
+  // Reset tokens when chain changes
   useEffect(() => {
-    const contracts = CONTRACTS[networkName as keyof typeof CONTRACTS];
-    if (contracts) {
-      SUPPORTED_TOKENS[1].address = contracts.wbnb as Address;
-      SUPPORTED_TOKENS[2].address = contracts.usdt as Address;
-      SUPPORTED_TOKENS[3].address = contracts.busd as Address;
-    }
-  }, [networkName]);
-  
-  // Get token balances
-  const { data: tokenABalance } = useBalance({
+    setTokenA(COMMON_TOKENS[0]);
+    setTokenB(COMMON_TOKENS[2]);
+    setAmountA('');
+    setAmountB('');
+  }, [chainId]);
+
+  // Get balances
+  const { data: balanceA } = useBalance({
     address,
-    token: tokenA.symbol === 'BNB' ? undefined : tokenA.address,
-    watch: true,
+    token: tokenA.address !== 'NATIVE' ? tokenA.address as Address : undefined,
   });
-  
-  const { data: tokenBBalance } = useBalance({
+  const { data: balanceB } = useBalance({
     address,
-    token: tokenB.symbol === 'BNB' ? undefined : tokenB.address,
-    watch: true,
+    token: tokenB.address !== 'NATIVE' ? tokenB.address as Address : undefined,
   });
-  
+
   // Get pair address
-  const { data: pairAddress } = useContractRead({
-    address: factoryAddress,
+  const { data: pairAddress } = useReadContract({
+    address: FACTORY_ADDRESS as `0x${string}`,
     abi: FACTORY_ABI,
     functionName: 'getPair',
     args: [
-      tokenA.symbol === 'BNB' ? wbnbAddress : tokenA.address,
-      tokenB.symbol === 'BNB' ? wbnbAddress : tokenB.address,
-    ],
-    watch: true,
+      tokenA.address === 'NATIVE' ? WBNB_ADDRESS : tokenA.address,
+      tokenB.address === 'NATIVE' ? WBNB_ADDRESS : tokenB.address,
+    ] as [Address, Address],
   });
-  
-  // Get pair reserves
-  const { data: reserves } = useContractRead({
+
+  // Get LP token balance
+  const { data: lpBalance } = useReadContract({
     address: pairAddress as Address,
     abi: PAIR_ABI,
-    functionName: 'getReserves',
-    enabled: !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000',
-    watch: true,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
   });
-  
-  // Get pair total supply
-  const { data: totalSupply } = useContractRead({
-    address: pairAddress as Address,
-    abi: PAIR_ABI,
-    functionName: 'totalSupply',
-    enabled: !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000',
-    watch: true,
-  });
-  
-  // Get user LP balance
-  const { data: lpBalance } = useBalance({
-    address,
-    token: pairAddress as Address,
-    enabled: !!pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000',
-    watch: true,
-  });
-  
-  // Calculate optimal amounts for adding liquidity
-  useEffect(() => {
-    if (reserves && amountA) {
-      const [reserve0, reserve1] = reserves as [bigint, bigint];
-      if (reserve0 > 0n && reserve1 > 0n) {
-        const optimalB = (parseEther(amountA) * reserve1) / reserve0;
-        setAmountB(formatEther(optimalB));
-      }
-    }
-  }, [amountA, reserves]);
-  
-  // Check token approvals
-  const { data: tokenAAllowance } = useContractRead({
-    address: tokenA.address,
+
+  // Write contracts
+  const { writeContract: approve, data: approveHash } = useWriteContract();
+  const { writeContract: addLiquidity, data: addLiquidityHash } = useWriteContract();
+  const { writeContract: removeLiquidity, data: removeLiquidityHash } = useWriteContract();
+
+  // Wait for transactions
+  const { isLoading: isApproving } = useWaitForTransactionReceipt({ hash: approveHash });
+  const { isLoading: isAdding } = useWaitForTransactionReceipt({ hash: addLiquidityHash });
+  const { isLoading: isRemoving } = useWaitForTransactionReceipt({ hash: removeLiquidityHash });
+
+  // Check allowances
+  const { data: allowanceA } = useReadContract({
+    address: tokenA.address !== 'NATIVE' ? tokenA.address as Address : undefined,
     abi: ERC20_ABI,
     functionName: 'allowance',
-    args: address && routerAddress ? [address, routerAddress] : undefined,
-    watch: true,
-    enabled: tokenA.symbol !== 'BNB' && !!address,
+    args: address && tokenA.address !== 'NATIVE' ? [address, ROUTER_ADDRESS] : undefined,
   });
-  
-  const { data: tokenBAllowance } = useContractRead({
-    address: tokenB.address,
+
+  const { data: allowanceB } = useReadContract({
+    address: tokenB.address !== 'NATIVE' ? tokenB.address as Address : undefined,
     abi: ERC20_ABI,
     functionName: 'allowance',
-    args: address && routerAddress ? [address, routerAddress] : undefined,
-    watch: true,
-    enabled: tokenB.symbol !== 'BNB' && !!address,
+    args: address && tokenB.address !== 'NATIVE' ? [address, ROUTER_ADDRESS] : undefined,
   });
-  
-  const { data: lpAllowance } = useContractRead({
-    address: pairAddress as Address,
-    abi: ERC20_ABI,
-    functionName: 'allowance',
-    args: address && routerAddress ? [address, routerAddress] : undefined,
-    watch: true,
-    enabled: !!pairAddress && !!address && activeTab === 'remove',
-  });
-  
-  const needsApprovalA = useMemo(() => {
-    if (tokenA.symbol === 'BNB') return false;
-    if (!tokenAAllowance || !amountA) return false;
-    return (tokenAAllowance as bigint) < parseEther(amountA);
-  }, [tokenAAllowance, amountA, tokenA]);
-  
-  const needsApprovalB = useMemo(() => {
-    if (tokenB.symbol === 'BNB') return false;
-    if (!tokenBAllowance || !amountB) return false;
-    return (tokenBAllowance as bigint) < parseEther(amountB);
-  }, [tokenBAllowance, amountB, tokenB]);
-  
-  const needsLPApproval = useMemo(() => {
-    if (!lpAllowance || !liquidityAmount) return false;
-    return (lpAllowance as bigint) < parseEther(liquidityAmount);
-  }, [lpAllowance, liquidityAmount]);
-  
-  // Prepare approve transactions
-  const { config: approveAConfig } = usePrepareContractWrite({
-    address: tokenA.address,
-    abi: ERC20_ABI,
-    functionName: 'approve',
-    args: [routerAddress, parseEther(amountA || '0')],
-    enabled: needsApprovalA && !!amountA,
-  });
-  
-  const { config: approveBConfig } = usePrepareContractWrite({
-    address: tokenB.address,
-    abi: ERC20_ABI,
-    functionName: 'approve',
-    args: [routerAddress, parseEther(amountB || '0')],
-    enabled: needsApprovalB && !!amountB,
-  });
-  
-  const { config: approveLPConfig } = usePrepareContractWrite({
-    address: pairAddress as Address,
-    abi: ERC20_ABI,
-    functionName: 'approve',
-    args: [routerAddress, parseEther(liquidityAmount || '0')],
-    enabled: needsLPApproval && !!liquidityAmount,
-  });
-  
-  const { write: approveAWrite, data: approveAData } = useContractWrite(approveAConfig);
-  const { write: approveBWrite, data: approveBData } = useContractWrite(approveBConfig);
-  const { write: approveLPWrite, data: approveLPData } = useContractWrite(approveLPConfig);
-  
-  const { isLoading: isApproveAPending } = useWaitForTransaction({
-    hash: approveAData?.hash,
-    onSuccess: () => setIsApproving(false),
-  });
-  
-  const { isLoading: isApproveBPending } = useWaitForTransaction({
-    hash: approveBData?.hash,
-    onSuccess: () => setIsApproving(false),
-  });
-  
-  const { isLoading: isApproveLPPending } = useWaitForTransaction({
-    hash: approveLPData?.hash,
-    onSuccess: () => setIsApproving(false),
-  });
-  
-  // Prepare add liquidity transaction
-  // PancakeSwap Router uses ETH naming even on BSC
-  const addFunction = useMemo(() => {
-    if (tokenA.symbol === 'BNB' || tokenB.symbol === 'BNB') return 'addLiquidityETH';
-    return 'addLiquidity';
-  }, [tokenA, tokenB]);
-  
-  const { config: addConfig } = usePrepareContractWrite({
-    address: routerAddress,
-    abi: ROUTER_ABI,
-    functionName: addFunction,
-    args: (() => {
-      if (!amountA || !amountB || !address) return undefined;
-      
-      const deadlineTime = BigInt(Math.floor(Date.now() / 1000) + Number(deadline) * 60);
-      
-      if (tokenA.symbol === 'BNB') {
-        return [
-          tokenB.address,
-          parseEther(amountB),
-          parseEther(amountB) * 95n / 100n, // 5% slippage
-          parseEther(amountA) * 95n / 100n,
-          address,
-          deadlineTime,
-        ];
-      } else if (tokenB.symbol === 'BNB') {
-        return [
-          tokenA.address,
-          parseEther(amountA),
-          parseEther(amountA) * 95n / 100n,
-          parseEther(amountB) * 95n / 100n,
-          address,
-          deadlineTime,
-        ];
-      } else {
-        return [
-          tokenA.address,
-          tokenB.address,
-          parseEther(amountA),
-          parseEther(amountB),
-          parseEther(amountA) * 95n / 100n,
-          parseEther(amountB) * 95n / 100n,
-          address,
-          deadlineTime,
-        ];
-      }
-    })(),
-    value: tokenA.symbol === 'BNB' ? parseEther(amountA || '0') : 
-           tokenB.symbol === 'BNB' ? parseEther(amountB || '0') : undefined,
-    enabled: !needsApprovalA && !needsApprovalB && !!amountA && !!amountB,
-  });
-  
-  const { write: addWrite, data: addData } = useContractWrite(addConfig);
-  
-  const { isLoading: isAddPending, isSuccess: isAddSuccess } = useWaitForTransaction({
-    hash: addData?.hash,
-    onSuccess: () => {
-      setIsAdding(false);
-      setAmountA('');
-      setAmountB('');
-    },
-  });
-  
-  // Prepare remove liquidity transaction
-  // PancakeSwap Router uses ETH naming even on BSC
-  const removeFunction = useMemo(() => {
-    if (selectedPair?.token0.symbol === 'BNB' || selectedPair?.token1.symbol === 'BNB') {
-      return 'removeLiquidityETH';
-    }
-    return 'removeLiquidity';
-  }, [selectedPair]);
-  
-  const { config: removeConfig } = usePrepareContractWrite({
-    address: routerAddress,
-    abi: ROUTER_ABI,
-    functionName: removeFunction,
-    args: (() => {
-      if (!liquidityAmount || !address || !selectedPair) return undefined;
-      
-      const deadlineTime = BigInt(Math.floor(Date.now() / 1000) + Number(deadline) * 60);
-      const liquidity = parseEther(liquidityAmount);
-      
-      if (selectedPair.token0.symbol === 'BNB' || selectedPair.token1.symbol === 'BNB') {
-        const token = selectedPair.token0.symbol === 'BNB' ? selectedPair.token1 : selectedPair.token0;
-        return [
-          token.address,
-          liquidity,
-          0n, // Accept any amount of tokens
-          0n, // Accept any amount of BNB
-          address,
-          deadlineTime,
-        ];
-      } else {
-        return [
-          selectedPair.token0.address,
-          selectedPair.token1.address,
-          liquidity,
-          0n, // Accept any amount of tokenA
-          0n, // Accept any amount of tokenB
-          address,
-          deadlineTime,
-        ];
-      }
-    })(),
-    enabled: !needsLPApproval && !!liquidityAmount && !!selectedPair,
-  });
-  
-  const { write: removeWrite, data: removeData } = useContractWrite(removeConfig);
-  
-  const { isLoading: isRemovePending, isSuccess: isRemoveSuccess } = useWaitForTransaction({
-    hash: removeData?.hash,
-    onSuccess: () => {
-      setIsRemoving(false);
-      setLiquidityAmount('');
-      setRemovePercent('50');
-    },
-  });
-  
-  const handleTokenSwitch = () => {
-    setTokenA(tokenB);
-    setTokenB(tokenA);
-    setAmountA('');
-    setAmountB('');
+
+  // Approve token
+  const handleApprove = async (token: typeof tokenA) => {
+    if (!address || token.address === 'NATIVE') return;
+
+    await approve({
+      address: token.address as Address,
+      abi: ERC20_ABI,
+      functionName: 'approve',
+      args: [ROUTER_ADDRESS, parseUnits('1000000', token.decimals)],
+    } as any);
   };
-  
-  const handleTokenSelect = (token: Token) => {
-    if (selectingTokenFor === 'A') {
-      if (token.address === tokenB.address) {
-        handleTokenSwitch();
-      } else {
-        setTokenA(token);
-      }
+
+  // Add liquidity
+  const handleAddLiquidity = async () => {
+    if (!address || !amountA || !amountB) return;
+
+    const amountADesired = parseUnits(amountA, tokenA.decimals);
+    const amountBDesired = parseUnits(amountB, tokenB.decimals);
+    const amountAMin = parseUnits((parseFloat(amountA) * (1 - parseFloat(slippage) / 100)).toFixed(tokenA.decimals), tokenA.decimals);
+    const amountBMin = parseUnits((parseFloat(amountB) * (1 - parseFloat(slippage) / 100)).toFixed(tokenB.decimals), tokenB.decimals);
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 20);
+
+    if (tokenA.address === 'NATIVE') {
+      await addLiquidity({
+        address: ROUTER_ADDRESS,
+        abi: ROUTER_ABI,
+        functionName: 'addLiquidityETH',
+        args: [tokenB.address as Address, amountBDesired, amountBMin, amountAMin, address, deadline],
+        value: amountADesired,
+      } as any);
+    } else if (tokenB.address === 'NATIVE') {
+      await addLiquidity({
+        address: ROUTER_ADDRESS,
+        abi: ROUTER_ABI,
+        functionName: 'addLiquidityETH',
+        args: [tokenA.address as Address, amountADesired, amountAMin, amountBMin, address, deadline],
+        value: amountBDesired,
+      } as any);
     } else {
-      if (token.address === tokenA.address) {
-        handleTokenSwitch();
-      } else {
-        setTokenB(token);
-      }
-    }
-    onCloseTokenSelect();
-  };
-  
-  const handleApprove = (token: 'A' | 'B' | 'LP') => {
-    setIsApproving(true);
-    if (token === 'A' && approveAWrite) approveAWrite();
-    if (token === 'B' && approveBWrite) approveBWrite();
-    if (token === 'LP' && approveLPWrite) approveLPWrite();
-  };
-  
-  const handleAdd = () => {
-    if (addWrite) {
-      setIsAdding(true);
-      addWrite();
+      await addLiquidity({
+        address: ROUTER_ADDRESS,
+        abi: ROUTER_ABI,
+        functionName: 'addLiquidity',
+        args: [
+          tokenA.address as Address,
+          tokenB.address as Address,
+          amountADesired,
+          amountBDesired,
+          amountAMin,
+          amountBMin,
+          address,
+          deadline,
+        ],
+      } as any);
     }
   };
-  
-  const handleRemove = () => {
-    if (removeWrite) {
-      setIsRemoving(true);
-      removeWrite();
-    }
+
+  // Remove liquidity
+  const handleRemoveLiquidity = async () => {
+    if (!address || !amountA || !pairAddress) return;
+
+    const liquidity = parseUnits(amountA, 18); // LP tokens are always 18 decimals
+    const amountAMin = BigInt(0);
+    const amountBMin = BigInt(0);
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 60 * 20);
+
+    await removeLiquidity({
+      address: ROUTER_ADDRESS,
+      abi: ROUTER_ABI,
+      functionName: 'removeLiquidity',
+      args: [
+        tokenA.address === 'NATIVE' ? WBNB_ADDRESS : (tokenA.address as Address),
+        tokenB.address === 'NATIVE' ? WBNB_ADDRESS : (tokenB.address as Address),
+        liquidity,
+        amountAMin,
+        amountBMin,
+        address,
+        deadline,
+      ],
+    } as any);
   };
-  
-  const shareOfPool = useMemo(() => {
-    if (!lpBalance || !totalSupply || !totalSupply) return '0';
-    const share = (Number(lpBalance.formatted) / Number(formatEther(totalSupply as bigint))) * 100;
-    return share.toFixed(2);
-  }, [lpBalance, totalSupply]);
-  
+
+  // Check if needs approval for adding liquidity
+  const needsApprovalA = tokenA.address !== 'NATIVE' && allowanceA !== undefined && amountA && parseFloat(amountA) > 0 && (allowanceA as bigint) < parseUnits(amountA, tokenA.decimals);
+  const needsApprovalB = tokenB.address !== 'NATIVE' && allowanceB !== undefined && amountB && parseFloat(amountB) > 0 && (allowanceB as bigint) < parseUnits(amountB, tokenB.decimals);
+
   return (
-    <>
-      <Card className="max-w-md mx-auto">
-        <CardHeader>
-          <h3 className="text-lg font-semibold">Liquidity</h3>
-        </CardHeader>
-        <CardBody className="gap-4">
-          <Tabs
-            selectedKey={activeTab}
-            onSelectionChange={(key) => setActiveTab(key as string)}
-            className="w-full"
-          >
-            <Tab key="add" title="Add Liquidity">
-              <div className="space-y-4 mt-4">
-                {/* Token A */}
-                <div className="bg-default-100 rounded-xl p-4">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm text-default-500">Token A</span>
-                    <span className="text-sm text-default-500">
-                      Balance: {tokenABalance ? Number(tokenABalance.formatted).toFixed(4) : '0.0000'}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="0.0"
-                      value={amountA}
-                      onValueChange={setAmountA}
-                      variant="bordered"
-                      classNames={{
-                        input: "text-xl",
-                        inputWrapper: "border-none bg-transparent",
-                      }}
-                    />
-                    <Button
-                      variant="flat"
-                      onPress={() => {
-                        setSelectingTokenFor('A');
-                        onOpenTokenSelect();
-                      }}
-                      className="min-w-[100px]"
-                    >
-                      {tokenA.symbol}
-                    </Button>
-                  </div>
-                </div>
-                
-                {/* Plus Icon */}
-                <div className="flex justify-center">
-                  <div className="p-2 rounded-full bg-default-100">
-                    <PlusIcon className="h-5 w-5" />
-                  </div>
-                </div>
-                
-                {/* Token B */}
-                <div className="bg-default-100 rounded-xl p-4">
-                  <div className="flex justify-between mb-2">
-                    <span className="text-sm text-default-500">Token B</span>
-                    <span className="text-sm text-default-500">
-                      Balance: {tokenBBalance ? Number(tokenBBalance.formatted).toFixed(4) : '0.0000'}
-                    </span>
-                  </div>
-                  <div className="flex gap-2">
-                    <Input
-                      type="number"
-                      placeholder="0.0"
-                      value={amountB}
-                      onValueChange={setAmountB}
-                      variant="bordered"
-                      classNames={{
-                        input: "text-xl",
-                        inputWrapper: "border-none bg-transparent",
-                      }}
-                    />
-                    <Button
-                      variant="flat"
-                      onPress={() => {
-                        setSelectingTokenFor('B');
-                        onOpenTokenSelect();
-                      }}
-                      className="min-w-[100px]"
-                    >
-                      {tokenB.symbol}
-                    </Button>
-                  </div>
-                </div>
-                
-                {/* Pool Info */}
-                {reserves && (
-                  <div className="bg-default-50 rounded-lg p-3 space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-default-500">Pool Reserve</span>
-                      <span>
-                        {Number(formatEther(reserves[0] as bigint)).toFixed(2)} / {Number(formatEther(reserves[1] as bigint)).toFixed(2)}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-default-500">Your Share</span>
-                      <span>{shareOfPool}%</span>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Action Button */}
-                {!isConnected ? (
-                  <Button color="primary" size="lg" isDisabled>
-                    Connect Wallet
-                  </Button>
-                ) : needsApprovalA ? (
-                  <Button
-                    color="primary"
-                    size="lg"
-                    onPress={() => handleApprove('A')}
-                    isLoading={isApproving || isApproveAPending}
-                  >
-                    Approve {tokenA.symbol}
-                  </Button>
-                ) : needsApprovalB ? (
-                  <Button
-                    color="primary"
-                    size="lg"
-                    onPress={() => handleApprove('B')}
-                    isLoading={isApproving || isApproveBPending}
-                  >
-                    Approve {tokenB.symbol}
-                  </Button>
-                ) : (
-                  <Button
-                    color="primary"
-                    size="lg"
-                    onPress={handleAdd}
-                    isDisabled={!addWrite || !amountA || !amountB}
-                    isLoading={isAdding || isAddPending}
-                  >
-                    {!amountA || !amountB ? 'Enter Amounts' : 'Add Liquidity'}
-                  </Button>
-                )}
-                
-                {isAddSuccess && (
-                  <Chip color="success" variant="flat">
-                    Liquidity Added Successfully!
-                  </Chip>
-                )}
+    <Card className="max-w-md mx-auto">
+      <CardBody className="gap-4">
+        {/* Header with Tabs */}
+        <Tabs selectedKey={activeTab} onSelectionChange={(key) => setActiveTab(key as 'add' | 'remove')}>
+          <Tab key="add" title={<div className="flex items-center gap-2"><Plus className="h-4 w-4" />Add Liquidity</div>} />
+          <Tab key="remove" title={<div className="flex items-center gap-2"><Minus className="h-4 w-4" />Remove Liquidity</div>} />
+        </Tabs>
+
+        {activeTab === 'add' ? (
+          <>
+            {/* Token A Input */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-default-500">Token A</span>
+                <span className="text-default-500">
+                  Balance: {balanceA ? parseFloat(formatUnits(balanceA.value, tokenA.decimals)).toFixed(4) : '0.0000'}
+                </span>
               </div>
-            </Tab>
-            
-            <Tab key="remove" title="Remove Liquidity">
-              <div className="space-y-4 mt-4">
-                {/* LP Token Balance */}
-                {lpBalance && Number(lpBalance.formatted) > 0 ? (
-                  <>
-                    <div className="bg-default-100 rounded-xl p-4">
-                      <div className="flex justify-between mb-2">
-                        <span className="text-sm text-default-500">Your LP Tokens</span>
-                        <span className="text-sm">{Number(lpBalance.formatted).toFixed(6)}</span>
-                      </div>
-                      
-                      <div className="mb-4">
-                        <div className="flex justify-between mb-2">
-                          <span className="text-sm text-default-500">Remove Amount</span>
-                          <span className="text-sm">{removePercent}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0"
-                          max="100"
-                          value={removePercent}
-                          onChange={(e) => {
-                            setRemovePercent(e.target.value);
-                            setLiquidityAmount((Number(lpBalance.formatted) * Number(e.target.value) / 100).toString());
-                          }}
-                          className="w-full"
-                        />
-                        <div className="flex justify-between mt-2">
-                          {['25', '50', '75', '100'].map(percent => (
-                            <Button
-                              key={percent}
-                              size="sm"
-                              variant={removePercent === percent ? 'solid' : 'flat'}
-                              onPress={() => {
-                                setRemovePercent(percent);
-                                setLiquidityAmount((Number(lpBalance.formatted) * Number(percent) / 100).toString());
-                              }}
-                            >
-                              {percent}%
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                      
-                      <Input
-                        type="number"
-                        label="LP Tokens to Remove"
-                        placeholder="0.0"
-                        value={liquidityAmount}
-                        onValueChange={setLiquidityAmount}
-                        variant="bordered"
-                      />
-                    </div>
-                    
-                    {/* Expected Output */}
-                    {liquidityAmount && reserves && totalSupply && (
-                      <div className="bg-default-50 rounded-lg p-3 space-y-1 text-sm">
-                        <div className="font-medium mb-2">You will receive:</div>
-                        <div className="flex justify-between">
-                          <span className="text-default-500">{tokenA.symbol}</span>
-                          <span>
-                            ~{((Number(liquidityAmount) / Number(formatEther(totalSupply as bigint))) * Number(formatEther(reserves[0] as bigint))).toFixed(4)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-default-500">{tokenB.symbol}</span>
-                          <span>
-                            ~{((Number(liquidityAmount) / Number(formatEther(totalSupply as bigint))) * Number(formatEther(reserves[1] as bigint))).toFixed(4)}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Remove Button */}
-                    {needsLPApproval ? (
-                      <Button
-                        color="primary"
-                        size="lg"
-                        onPress={() => handleApprove('LP')}
-                        isLoading={isApproving || isApproveLPPending}
-                      >
-                        Approve LP Tokens
-                      </Button>
-                    ) : (
-                      <Button
-                        color="primary"
-                        size="lg"
-                        onPress={handleRemove}
-                        isDisabled={!removeWrite || !liquidityAmount || Number(liquidityAmount) === 0}
-                        isLoading={isRemoving || isRemovePending}
-                      >
-                        {!liquidityAmount || Number(liquidityAmount) === 0 
-                          ? 'Enter Amount' 
-                          : 'Remove Liquidity'}
-                      </Button>
-                    )}
-                    
-                    {isRemoveSuccess && (
-                      <Chip color="success" variant="flat">
-                        Liquidity Removed Successfully!
-                      </Chip>
-                    )}
-                  </>
-                ) : (
-                  <div className="text-center py-8 text-default-500">
-                    No liquidity positions found
-                  </div>
-                )}
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder="0.0"
+                  value={amountA}
+                  onChange={(e) => setAmountA(e.target.value)}
+                />
+                <Select
+                  selectedKeys={[tokenA.symbol]}
+                  onChange={(e) => {
+                    const token = COMMON_TOKENS.find(t => t.symbol === e.target.value);
+                    if (token) setTokenA(token);
+                  }}
+                  className="w-32"
+                >
+                  {COMMON_TOKENS.map((token) => (
+                    <SelectItem key={token.symbol} value={token.symbol}>
+                      {token.symbol}
+                    </SelectItem>
+                  ))}
+                </Select>
               </div>
-            </Tab>
-          </Tabs>
-        </CardBody>
-      </Card>
-      
-      {/* Token Selection Modal */}
-      <Modal isOpen={isTokenSelectOpen} onClose={onCloseTokenSelect} size="sm">
-        <ModalContent>
-          <ModalHeader>Select Token</ModalHeader>
-          <ModalBody className="gap-2 pb-6">
-            {SUPPORTED_TOKENS.map(token => (
-              <Button
-                key={token.symbol}
-                variant="flat"
-                onPress={() => handleTokenSelect(token)}
-                className="justify-start"
-                isDisabled={
-                  (selectingTokenFor === 'A' && token.address === tokenB.address) ||
-                  (selectingTokenFor === 'B' && token.address === tokenA.address)
-                }
-              >
-                <div className="flex items-center gap-3 w-full">
-                  <div className="w-8 h-8 rounded-full bg-default-200 flex items-center justify-center">
-                    {token.symbol.charAt(0)}
-                  </div>
-                  <div className="flex-1 text-left">
-                    <div className="font-medium">{token.symbol}</div>
-                    <div className="text-xs text-default-500">{token.name}</div>
-                  </div>
-                </div>
+            </div>
+
+            <div className="flex justify-center">
+              <Plus className="h-4 w-4 text-default-400" />
+            </div>
+
+            {/* Token B Input */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-default-500">Token B</span>
+                <span className="text-default-500">
+                  Balance: {balanceB ? parseFloat(formatUnits(balanceB.value, tokenB.decimals)).toFixed(4) : '0.0000'}
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder="0.0"
+                  value={amountB}
+                  onChange={(e) => setAmountB(e.target.value)}
+                />
+                <Select
+                  selectedKeys={[tokenB.symbol]}
+                  onChange={(e) => {
+                    const token = COMMON_TOKENS.find(t => t.symbol === e.target.value);
+                    if (token) setTokenB(token);
+                  }}
+                  className="w-32"
+                >
+                  {COMMON_TOKENS.map((token) => (
+                    <SelectItem key={token.symbol} value={token.symbol}>
+                      {token.symbol}
+                    </SelectItem>
+                  ))}
+                </Select>
+              </div>
+            </div>
+
+            {/* Slippage */}
+            <div className="flex items-center gap-2 text-sm text-default-500">
+              <Info className="h-4 w-4" />
+              <span>Slippage Tolerance:</span>
+              <Input
+                type="number"
+                value={slippage}
+                onChange={(e) => setSlippage(e.target.value)}
+                size="sm"
+                className="w-20"
+                endContent="%"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            {!isConnected ? (
+              <Button color="primary" size="lg" fullWidth disabled>
+                Connect Wallet First
               </Button>
-            ))}
-          </ModalBody>
-        </ModalContent>
-      </Modal>
-    </>
+            ) : chain?.id !== bsc.id ? (
+              <Button color="warning" size="lg" fullWidth disabled>
+                Switch to BSC Mainnet
+              </Button>
+            ) : needsApprovalA ? (
+              <Button color="primary" size="lg" fullWidth onClick={() => handleApprove(tokenA)} isLoading={isApproving}>
+                Approve {tokenA.symbol}
+              </Button>
+            ) : needsApprovalB ? (
+              <Button color="primary" size="lg" fullWidth onClick={() => handleApprove(tokenB)} isLoading={isApproving}>
+                Approve {tokenB.symbol}
+              </Button>
+            ) : (
+              <Button
+                color="success"
+                size="lg"
+                fullWidth
+                onClick={handleAddLiquidity}
+                isLoading={isAdding}
+                isDisabled={!amountA || !amountB || parseFloat(amountA) <= 0 || parseFloat(amountB) <= 0}
+              >
+                Add Liquidity
+              </Button>
+            )}
+          </>
+        ) : (
+          <>
+            {/* Remove Liquidity */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-default-500">LP Tokens</span>
+                <span className="text-default-500">
+                  Balance: {lpBalance ? parseFloat(formatUnits(lpBalance as bigint, 18)).toFixed(6) : '0.000000'}
+                </span>
+              </div>
+              <Input
+                type="number"
+                placeholder="0.0"
+                value={amountA}
+                onChange={(e) => setAmountA(e.target.value)}
+                description={`${tokenA.symbol}-${tokenB.symbol} LP`}
+              />
+            </div>
+
+            <div className="text-sm text-default-500">
+              <Info className="h-4 w-4 inline mr-1" />
+              You will receive both {tokenA.symbol} and {tokenB.symbol}
+            </div>
+
+            {/* Action Button */}
+            {!isConnected ? (
+              <Button color="primary" size="lg" fullWidth disabled>
+                Connect Wallet First
+              </Button>
+            ) : !pairAddress || pairAddress === '0x0000000000000000000000000000000000000000' ? (
+              <Button color="warning" size="lg" fullWidth disabled>
+                Pair Does Not Exist
+              </Button>
+            ) : (
+              <Button
+                color="danger"
+                size="lg"
+                fullWidth
+                onClick={handleRemoveLiquidity}
+                isLoading={isRemoving}
+                isDisabled={!amountA || parseFloat(amountA) <= 0}
+              >
+                Remove Liquidity
+              </Button>
+            )}
+          </>
+        )}
+
+        {/* LP Info */}
+        {pairAddress && pairAddress !== '0x0000000000000000000000000000000000000000' && (
+          <div className="text-sm text-default-500 text-center">
+            Your LP Tokens: {lpBalance ? parseFloat(formatUnits(lpBalance as bigint, 18)).toFixed(6) : '0.000000'}
+          </div>
+        )}
+      </CardBody>
+    </Card>
   );
 }

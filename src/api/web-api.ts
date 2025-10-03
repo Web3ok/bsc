@@ -1,13 +1,12 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import http from 'http';
-import { body, query, validationResult } from 'express-validator';
+import { body, validationResult } from 'express-validator';
 import { ethers } from 'ethers';
 import { MultiDEXAggregator } from '../dex/multi-dex-aggregator';
 import { WalletManager } from '../wallet';
 import { BatchWalletManager } from '../wallet/batch-wallet-manager';
 import { BatchTradingAPI } from './batch-trading-api';
-import { monitoringServer } from '../monitor/server';
 import { webSocketServer } from './websocket-server';
 import { healthMonitor } from '../monitor/health';
 import { logger } from '../utils/logger';
@@ -74,7 +73,7 @@ export class WebAPI {
       try {
         const health = await healthMonitor.getSystemHealth();
         res.json(health);
-      } catch (error) {
+      } catch {
         res.status(500).json({ error: 'Health check failed' });
       }
     });
@@ -125,7 +124,8 @@ export class WebAPI {
     this.app.use('/api/batch', this.batchTradingAPI.router);
 
     // Error handling middleware
-    this.app.use((error: any, req: Request, res: Response, next: any) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.app.use((error: any, req: Request, res: Response, _next: any) => {
       logger.error({ error, url: req.url }, 'API error');
       res.status(500).json({
         error: 'Internal server error',
@@ -230,11 +230,9 @@ export class WebAPI {
   private async handleSystemStatus(req: Request, res: Response): Promise<void> {
     try {
       const health = await healthMonitor.getSystemHealth();
-      const dexHealth = await this.multiDexAggregator.getDEXHealthStatus();
-      
+
       // Get RPC provider details
       const rpcProviderCheck = health.checks.find(c => c.name === 'rpc_provider');
-      const rpcConnectionCheck = health.checks.find(c => c.name === 'rpc_connection');
       
       res.json({
         success: true,
@@ -566,6 +564,7 @@ export class WebAPI {
         warning = 'Service error - using static fallback price';
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const response: any = {
         success: true,
         data: price,

@@ -1,6 +1,9 @@
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { WalletManager, WalletInfo } from './index';
 import { logger } from '../utils/logger';
+import { database } from '../persistence/database';
+import { CryptoUtils } from '../utils/crypto';
+import { ConfigLoader } from '../config/loader';
 import * as fs from 'fs';
 
 export interface BatchWalletImportData {
@@ -28,6 +31,8 @@ export interface BatchWalletExportData {
 export interface WalletGenerationConfig {
   count: number;
   aliasPrefix?: string;
+  label?: string;  // Single wallet label
+  group?: string;  // Group name
   tags?: string[];
   tier?: 'hot' | 'warm' | 'cold' | 'vault';
   autoFund?: {
@@ -68,23 +73,52 @@ export class BatchWalletManager {
 
     logger.info({ count: config.count }, 'Starting batch wallet generation');
 
+    // Ensure database connection
+    await database.ensureConnection();
+    const db = database.getConnection();
+
+    // Get encryption password
+    const configLoader = ConfigLoader.getInstance();
+    const encryptionPassword = configLoader.getEncryptionPassword();
+
     for (let i = 0; i < config.count; i++) {
       try {
         // Generate new wallet using viem
         const privateKey = generatePrivateKey();
         const account = privateKeyToAccount(privateKey);
 
+        // Determine label for this wallet
+        const label = config.count === 1
+          ? (config.label || config.aliasPrefix || 'Wallet')
+          : (config.aliasPrefix ? `${config.aliasPrefix}-${i + 1}` : `Wallet-${i + 1}`);
+
         const walletInfo: WalletInfo = {
           address: account.address,
           privateKey: privateKey,
           derivationIndex: -1, // Not derived from seed
-          alias: config.aliasPrefix ? `${config.aliasPrefix}-${i + 1}` : `Wallet-${i + 1}`,
+          alias: label,
+          label,
+          group: config.group,
           tier: config.tier || 'hot',
           createdAt: new Date(),
         };
 
-        // Add wallet to manager
+        // Add wallet to manager (in-memory)
         await this.walletManager.addWallet(walletInfo);
+
+        // Encrypt private key for database storage
+        const encryptedPrivateKey = CryptoUtils.encrypt(privateKey, encryptionPassword);
+
+        // Save to database
+        await db('wallets').insert({
+          address: account.address,
+          private_key_encrypted: encryptedPrivateKey,
+          derivation_index: -1,
+          label: label,
+          group_name: config.group || null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
 
         // Add tags if specified
         if (config.tags && config.tags.length > 0) {
@@ -95,10 +129,10 @@ export class BatchWalletManager {
 
         results.push({
           success: true,
-          data: { address: walletInfo.address, alias: walletInfo.alias },
+          data: { address: walletInfo.address, alias: walletInfo.alias, label, group: config.group },
         });
 
-        logger.debug({ address: walletInfo.address, index: i + 1 }, 'Generated wallet');
+        logger.debug({ address: walletInfo.address, label, group: config.group, index: i + 1 }, 'Generated and saved wallet');
 
         // Auto-fund if enabled
         if (config.autoFund?.enabled && config.autoFund.amountBNB) {
@@ -129,10 +163,10 @@ export class BatchWalletManager {
 
     const successCount = results.filter(r => r.success).length;
 
-    logger.info({ 
+    logger.info({
       total: config.count,
       success: successCount,
-      failed: errors.length 
+      failed: errors.length
     }, 'Batch wallet generation completed');
 
     return {

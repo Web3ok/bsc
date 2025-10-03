@@ -229,15 +229,15 @@ export default function BatchOperations() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Batch Operations</h2>
-          <p className="text-gray-600">Execute trades across multiple wallets</p>
+          <h2 className="text-2xl font-bold">批量操作</h2>
+          <p className="text-muted-foreground">跨多个钱包执行交易</p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" variant="bordered" onPress={onStrategyOpen} startContent={<Settings className="h-4 w-4" />}>
-            Strategies
+            策略管理
           </Button>
           <Button size="sm" color="primary" onPress={onCreateOpen} startContent={<Play className="h-4 w-4" />}>
-            Create Batch
+            创建批量任务
           </Button>
         </div>
       </div>
@@ -245,7 +245,7 @@ export default function BatchOperations() {
       {/* Control Panel */}
       <Card>
         <CardHeader>
-          <h3 className="text-lg font-semibold">Execution Control</h3>
+          <h3 className="text-lg font-semibold">执行控制</h3>
         </CardHeader>
         <CardBody>
           <div className="flex items-center gap-4">
@@ -255,7 +255,7 @@ export default function BatchOperations() {
               isDisabled={isRunning || operations.filter(op => op.status === 'pending').length === 0}
               startContent={<Play className="h-4 w-4" />}
             >
-              Execute Batch
+              执行批量任务
             </Button>
             <Button
               color="danger"
@@ -263,14 +263,14 @@ export default function BatchOperations() {
               isDisabled={!isRunning}
               startContent={<Square className="h-4 w-4" />}
             >
-              Stop
+              停止
             </Button>
             <Button
               variant="bordered"
               onPress={() => setOperations([])}
               startContent={<RotateCcw className="h-4 w-4" />}
             >
-              Clear All
+              清空全部
             </Button>
             
             <div className="flex-1">
@@ -288,18 +288,18 @@ export default function BatchOperations() {
       {/* Operations Table */}
       <Card>
         <CardHeader>
-          <h3 className="text-lg font-semibold">Operations Queue ({operations.length})</h3>
+          <h3 className="text-lg font-semibold">操作队列 ({operations.length})</h3>
         </CardHeader>
         <CardBody>
           <Table aria-label="Batch operations table">
             <TableHeader>
-              <TableColumn>TYPE</TableColumn>
-              <TableColumn>WALLET</TableColumn>
-              <TableColumn>TRADE PAIR</TableColumn>
-              <TableColumn>AMOUNT</TableColumn>
-              <TableColumn>STATUS</TableColumn>
-              <TableColumn>PROGRESS</TableColumn>
-              <TableColumn>RESULT</TableColumn>
+              <TableColumn>类型</TableColumn>
+              <TableColumn>钱包</TableColumn>
+              <TableColumn>交易对</TableColumn>
+              <TableColumn>数量</TableColumn>
+              <TableColumn>状态</TableColumn>
+              <TableColumn>进度</TableColumn>
+              <TableColumn>结果</TableColumn>
             </TableHeader>
             <TableBody>
               {operations.map((op) => (
@@ -333,12 +333,12 @@ export default function BatchOperations() {
                   </TableCell>
                   <TableCell>
                     {op.result && (
-                      <span className="text-xs font-mono text-green-600">
+                      <span className="text-xs font-mono text-green-500 dark:text-green-400">
                         {op.result.amountOut || op.result.txHash?.slice(0, 8)}
                       </span>
                     )}
                     {op.error && (
-                      <span className="text-xs text-red-600">Error</span>
+                      <span className="text-xs text-red-500 dark:text-red-400">错误</span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -351,30 +351,30 @@ export default function BatchOperations() {
       {/* Create Batch Modal */}
       <Modal isOpen={isCreateOpen} onClose={onCreateClose} size="2xl">
         <ModalContent>
-          <ModalHeader>Create Batch Operation</ModalHeader>
+          <ModalHeader>创建批量操作</ModalHeader>
           <ModalBody>
             <div className="space-y-4">
               <Select
-                label="Operation Type"
+                label="操作类型"
                 selectedKeys={[batchConfig.operationType]}
                 onSelectionChange={(keys) => setBatchConfig({
-                  ...batchConfig, 
+                  ...batchConfig,
                   operationType: Array.from(keys)[0] as string
                 })}
               >
-                <SelectItem key="buy" value="buy" textValue="Buy (BNB → Token)">Buy (BNB → Token)</SelectItem>
-                <SelectItem key="sell" value="sell" textValue="Sell (Token → BNB)">Sell (Token → BNB)</SelectItem>
+                <SelectItem key="buy" value="buy" textValue="买入 (BNB → 代币)">买入 (BNB → 代币)</SelectItem>
+                <SelectItem key="sell" value="sell" textValue="卖出 (代币 → BNB)">卖出 (代币 → BNB)</SelectItem>
               </Select>
 
               <div className="grid grid-cols-2 gap-4">
                 <Input
-                  label="Amount per Operation"
+                  label="每次操作数量"
                   placeholder="0.01"
                   value={batchConfig.amountIn}
                   onChange={(e) => setBatchConfig({ ...batchConfig, amountIn: e.target.value })}
                 />
                 <Input
-                  label="Slippage %"
+                  label="滑点 %"
                   placeholder="1.0"
                   value={batchConfig.slippage}
                   onChange={(e) => setBatchConfig({ ...batchConfig, slippage: e.target.value })}
@@ -383,28 +383,28 @@ export default function BatchOperations() {
 
               <div className="grid grid-cols-2 gap-4">
                 <Input
-                  label="Max Concurrency"
+                  label="最大并发数"
                   type="number"
                   value={batchConfig.maxConcurrency.toString()}
-                  onChange={(e) => setBatchConfig({ 
-                    ...batchConfig, 
+                  onChange={(e) => setBatchConfig({
+                    ...batchConfig,
                     maxConcurrency: parseInt(e.target.value) || 1
                   })}
                 />
                 <Input
-                  label="Delay (ms)"
+                  label="延迟 (毫秒)"
                   type="number"
                   value={batchConfig.delayBetweenOps.toString()}
-                  onChange={(e) => setBatchConfig({ 
-                    ...batchConfig, 
+                  onChange={(e) => setBatchConfig({
+                    ...batchConfig,
                     delayBetweenOps: parseInt(e.target.value) || 1000
                   })}
                 />
               </div>
 
               <Textarea
-                label="Selected Wallets"
-                placeholder="Enter wallet addresses (one per line)"
+                label="选择钱包"
+                placeholder="输入钱包地址（每行一个）"
                 rows={4}
                 value={selectedWallets.join('\n')}
                 onChange={(e) => setSelectedWallets(
@@ -415,10 +415,10 @@ export default function BatchOperations() {
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={onCreateClose}>
-              Cancel
+              取消
             </Button>
             <Button color="primary" onPress={handleCreateBatchOperation}>
-              Create Batch
+              创建批量任务
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -427,41 +427,41 @@ export default function BatchOperations() {
       {/* Strategy Modal */}
       <Modal isOpen={isStrategyOpen} onClose={onStrategyClose} size="3xl">
         <ModalContent>
-          <ModalHeader>Batch Strategies</ModalHeader>
+          <ModalHeader>批量策略</ModalHeader>
           <ModalBody>
             <Tabs defaultSelectedKey="presets">
-              <Tab key="presets" title="Preset Strategies">
+              <Tab key="presets" title="预设策略">
                 <div className="space-y-4">
                   {/* Preset strategies would go here */}
                   <Card>
                     <CardBody>
-                      <h4 className="font-semibold">Dollar Cost Averaging</h4>
-                      <p className="text-sm text-gray-600">
-                        Gradually buy tokens over time to reduce price impact
+                      <h4 className="font-semibold">定投策略</h4>
+                      <p className="text-sm text-muted-foreground">
+                        逐步买入代币以减少价格影响
                       </p>
                       <div className="mt-2">
-                        <Chip size="sm" color="success">Low Risk</Chip>
-                        <span className="ml-2 text-sm">~5 minutes</span>
+                        <Chip size="sm" color="success">低风险</Chip>
+                        <span className="ml-2 text-sm text-muted-foreground">~5分钟</span>
                       </div>
                     </CardBody>
                   </Card>
                 </div>
               </Tab>
-              <Tab key="custom" title="Create Custom">
+              <Tab key="custom" title="自定义策略">
                 <div className="space-y-4">
                   <Input
-                    label="Strategy Name"
+                    label="策略名称"
                     value={newStrategy.name}
                     onChange={(e) => setNewStrategy({ ...newStrategy, name: e.target.value })}
                   />
                   <Textarea
-                    label="Description"
+                    label="描述"
                     value={newStrategy.description}
                     onChange={(e) => setNewStrategy({ ...newStrategy, description: e.target.value })}
                   />
                   <Textarea
-                    label="Operations Configuration (JSON)"
-                    placeholder="Enter operations configuration..."
+                    label="操作配置 (JSON)"
+                    placeholder="输入操作配置..."
                     rows={6}
                     value={newStrategy.operationsConfig}
                     onChange={(e) => setNewStrategy({ ...newStrategy, operationsConfig: e.target.value })}
@@ -472,7 +472,7 @@ export default function BatchOperations() {
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={onStrategyClose}>
-              Close
+              关闭
             </Button>
           </ModalFooter>
         </ModalContent>

@@ -259,11 +259,34 @@ export class APIServer {
     this.app.use('/api/trading', tradingAPI.getRouter());
     
     // Add alerts endpoint directly
-    this.app.get('/api/alerts', (req, res) => {
-      res.json({
-        success: true,
-        data: []  // Return empty alerts in development
-      });
+    this.app.get('/api/alerts', async (req, res) => {
+      try {
+        const db = this.database.connection;
+
+        if (!db) {
+          throw new Error('Database not connected');
+        }
+
+        // Get active alerts from the last 24 hours
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        const alerts = await db('monitoring_alerts')
+          .where('triggered_at', '>=', oneDayAgo)
+          .where('is_resolved', false)
+          .orderBy('triggered_at', 'desc')
+          .limit(100);
+
+        res.json({
+          success: true,
+          data: alerts
+        });
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch alerts');
+        res.json({
+          success: true,
+          data: []  // Return empty array on error
+        });
+      }
     });
 
     // Add monitoring health checks endpoint
@@ -313,30 +336,155 @@ export class APIServer {
 
     // Add missing endpoints
     this.app.get('/api/dashboard/metrics', async (req, res) => {
-      res.json({
-        success: true,
-        data: {
-          totalVolume: '0',
-          totalTrades: 0,
-          successRate: 0,
-          profitLoss: '0',
-          activePositions: 0,
-          gasSpent: '0',
-          timestamp: new Date().toISOString()
+      try {
+        // Get real trading metrics from database
+        const db = this.database.connection;
+
+        if (!db) {
+          throw new Error('Database not connected');
         }
-      });
+
+        // Get 24h metrics
+        const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+        // Count total trades in last 24h
+        const tradesResult = await db('trades')
+          .where('created_at', '>=', oneDayAgo)
+          .count('* as count')
+          .first();
+
+        const totalTrades = Number(tradesResult?.count || 0);
+
+        // Calculate total volume in last 24h
+        const volumeResult = await db('trades')
+          .where('created_at', '>=', oneDayAgo)
+          .where('status', 'completed')
+          .sum('amount_in as total')
+          .first();
+
+        const totalVolume = volumeResult?.total || '0';
+
+        // Calculate success rate
+        const successResult = await db('trades')
+          .where('created_at', '>=', oneDayAgo)
+          .where('status', 'completed')
+          .count('* as count')
+          .first();
+
+        const successfulTrades = Number(successResult?.count || 0);
+        const successRate = totalTrades > 0 ? (successfulTrades / totalTrades) * 100 : 0;
+
+        // Calculate P&L (profit/loss)
+        const pnlResult = await db('trades')
+          .where('created_at', '>=', oneDayAgo)
+          .where('status', 'completed')
+          .select(db.raw('SUM(CAST(amount_out as DECIMAL) - CAST(amount_in as DECIMAL)) as pnl'))
+          .first();
+
+        const profitLoss = pnlResult?.pnl || '0';
+
+        // Get active positions
+        const activePositionsResult = await db('trades')
+          .where('status', 'pending')
+          .count('* as count')
+          .first();
+
+        const activePositions = Number(activePositionsResult?.count || 0);
+
+        // Calculate gas spent
+        const gasResult = await db('trades')
+          .where('created_at', '>=', oneDayAgo)
+          .sum('gas_used as total')
+          .first();
+
+        const gasSpent = gasResult?.total || '0';
+
+        res.json({
+          success: true,
+          data: {
+            totalVolume: String(totalVolume),
+            totalTrades,
+            successRate: successRate.toFixed(2),
+            profitLoss: String(profitLoss),
+            activePositions,
+            gasSpent: String(gasSpent),
+            timestamp: new Date().toISOString()
+          }
+        });
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch dashboard metrics');
+        // Fallback to zero values if database query fails
+        res.json({
+          success: true,
+          data: {
+            totalVolume: '0',
+            totalTrades: 0,
+            successRate: 0,
+            profitLoss: '0',
+            activePositions: 0,
+            gasSpent: '0',
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
     });
 
     this.app.get('/api/monitoring/logs', async (req, res) => {
-      res.json({
-        success: true,
-        data: [],
-        pagination: {
-          page: 1,
-          limit: 50,
-          total: 0
+      try {
+        const db = this.database.connection;
+
+        if (!db) {
+          throw new Error('Database not connected');
         }
-      });
+
+        // Get pagination parameters
+        const page = parseInt(req.query.page as string) || 1;
+        const limit = parseInt(req.query.limit as string) || 50;
+        const offset = (page - 1) * limit;
+        const level = req.query.level as string; // filter by level: info, warn, error
+        const search = req.query.search as string; // search in message
+
+        // Build query
+        let query = db('system_events').orderBy('created_at', 'desc');
+
+        if (level) {
+          query = query.where('severity', level);
+        }
+
+        if (search) {
+          query = query.where('message', 'like', `%${search}%`);
+        }
+
+        // Get total count
+        const countResult = await query.clone().count('* as count').first();
+        const total = Number(countResult?.count || 0);
+
+        // Get logs
+        const logs = await query.limit(limit).offset(offset);
+
+        res.json({
+          success: true,
+          data: logs,
+          pagination: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit)
+          }
+        });
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch monitoring logs');
+        res.json({
+          success: true,
+          data: [],
+          pagination: {
+            page: 1,
+            limit: 50,
+            total: 0,
+            totalPages: 0
+          }
+        });
+      }
     });
 
     // API documentation
@@ -1366,7 +1514,7 @@ export class APIServer {
         }
 
         let imported = 0;
-        let errors: string[] = [];
+        const errors: string[] = [];
 
         if (type === 'json') {
           try {

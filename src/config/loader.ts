@@ -94,23 +94,23 @@ export class ConfigLoader {
 
   getGasConfig(): GasConfig {
     return {
-      autoGas: process.env.AUTO_GAS === 'true' || this.config.gas?.auto_gas || true,
-      maxGasPriceGwei: process.env.MAX_GAS_PRICE_GWEI ? 
-        parseFloat(process.env.MAX_GAS_PRICE_GWEI) : this.config.gas?.max_gas_price_gwei || 20,
-      priorityFeeGwei: process.env.PRIORITY_FEE_GWEI ? 
-        parseFloat(process.env.PRIORITY_FEE_GWEI) : this.config.gas?.priority_fee_gwei || 2,
-      gasMultiplier: this.config.gas?.gas_multiplier || 1.1
+      autoGas: process.env.AUTO_GAS === 'true' || (this.config.gas?.auto_gas ?? true),
+      maxGasPriceGwei: process.env.MAX_GAS_PRICE_GWEI ?
+        parseFloat(process.env.MAX_GAS_PRICE_GWEI) : (this.config.gas?.max_gas_price_gwei ?? 20),
+      priorityFeeGwei: process.env.PRIORITY_FEE_GWEI ?
+        parseFloat(process.env.PRIORITY_FEE_GWEI) : (this.config.gas?.priority_fee_gwei ?? 2),
+      gasMultiplier: this.config.gas?.gas_multiplier ?? 1.1
     };
   }
 
   getRiskConfig(): RiskConfig {
     return {
-      enableWhitelist: this.config.risk?.enable_whitelist || true,
-      enableBlacklist: this.config.risk?.enable_blacklist || true,
+      enableWhitelist: this.config.risk?.enable_whitelist ?? true,
+      enableBlacklist: this.config.risk?.enable_blacklist ?? true,
       emergencyStopLossPercent: process.env.EMERGENCY_STOP_LOSS_PERCENT ?
-        parseFloat(process.env.EMERGENCY_STOP_LOSS_PERCENT) : 
-        this.config.risk?.emergency_stop_loss_percent || 10,
-      maxWalletExposurePercent: this.config.risk?.max_wallet_exposure_percent || 20
+        parseFloat(process.env.EMERGENCY_STOP_LOSS_PERCENT) :
+        (this.config.risk?.emergency_stop_loss_percent ?? 10),
+      maxWalletExposurePercent: this.config.risk?.max_wallet_exposure_percent ?? 20
     };
   }
 

@@ -17,13 +17,118 @@ export default function SettingsPage() {
   const toggleDarkMode = () => setTheme(isDarkMode ? 'light' : 'dark');
 
   const handleSave = () => {
-    // TODO: Implement save functionality
-    console.log('Settings saved');
+    try {
+      // 保存设置到 localStorage
+      const settings = {
+        theme,
+        language,
+        autoSave,
+        notifications,
+        apiKey: apiKey ? '***hidden***' : '', // 不保存明文API密钥
+        lastUpdated: new Date().toISOString()
+      };
+
+      localStorage.setItem('bsc_bot_settings', JSON.stringify(settings));
+      alert(t('settings.settingsSaved') || '✅ Settings saved successfully!');
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+      alert(t('settings.saveFailed') || '❌ Failed to save settings');
+    }
   };
 
-  const handleExport = () => {
-    // TODO: Implement export functionality
-    console.log('Data exported');
+  const handleExport = async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10001';
+
+      // 显示确认对话框
+      const confirmed = window.confirm(
+        t('settings.exportWarning') ||
+        'This will export all wallets data (including private keys). Are you sure?\n\n' +
+        '⚠️ Keep the exported file secure!\n' +
+        '⚠️ Never share it with anyone!'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      const response = await fetch(`${apiUrl}/api/v1/wallets/export`);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        alert(
+          `${t('settings.exportSuccess') || '✅ Export successful!'}\n\n` +
+          `${t('settings.filePath') || 'File saved to'}: ${result.data.filePath}\n` +
+          `${t('settings.walletCount') || 'Wallets'}: ${result.data.count}\n` +
+          `${t('settings.format') || 'Format'}: ${result.data.format.toUpperCase()}\n\n` +
+          `${t('settings.keepFileSafe') || '⚠️ Keep this file safe!'}`
+        );
+      } else {
+        throw new Error(result.message || 'Export failed');
+      }
+    } catch (error) {
+      console.error('Export failed:', error);
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      alert(`${t('settings.exportFailed') || '❌ Export Failed'}: ${errorMsg}`);
+    }
+  };
+
+  const handleClearCache = () => {
+    try {
+      // 清除本地缓存
+      const confirmed = window.confirm(
+        t('settings.clearCacheWarning') ||
+        'This will clear all cached data. Continue?'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      // 清除 localStorage 中的缓存（保留设置）
+      const settings = localStorage.getItem('bsc_bot_settings');
+      localStorage.clear();
+      if (settings) {
+        localStorage.setItem('bsc_bot_settings', settings);
+      }
+
+      alert(t('settings.cacheCleared') || '✅ Cache cleared successfully!');
+    } catch (error) {
+      console.error('Failed to clear cache:', error);
+      alert(t('settings.clearCacheFailed') || '❌ Failed to clear cache');
+    }
+  };
+
+  const handleResetSettings = () => {
+    try {
+      const confirmed = window.confirm(
+        t('settings.resetWarning') ||
+        'This will reset all settings to default. Continue?'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      // 重置所有设置
+      setTheme('light');
+      setLanguage('en');
+      setApiKey('');
+      setAutoSave(true);
+      setNotifications(true);
+
+      localStorage.removeItem('bsc_bot_settings');
+
+      alert(t('settings.settingsReset') || '✅ Settings reset to default!');
+    } catch (error) {
+      console.error('Failed to reset settings:', error);
+      alert(t('settings.resetFailed') || '❌ Failed to reset settings');
+    }
   };
 
   return (
@@ -179,14 +284,16 @@ export default function SettingsPage() {
               </Button>
               
               <Button
+                onPress={handleClearCache}
                 color="warning"
                 variant="bordered"
                 className="w-full"
               >
                 {t('settings.clearCache')}
               </Button>
-              
+
               <Button
+                onPress={handleResetSettings}
                 color="danger"
                 variant="bordered"
                 className="w-full"

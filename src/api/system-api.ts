@@ -45,5 +45,13 @@ export class SystemAPI {
         },
       });
     });
+
+    // Alerts endpoint
+    this.router.get('/alerts', (req, res) => {
+      res.json({
+        success: true,
+        data: []  // Return empty alerts in development
+      });
+    });
   }
 }

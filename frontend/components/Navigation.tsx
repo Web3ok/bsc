@@ -3,15 +3,17 @@
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { useLanguage } from '../contexts/LanguageContext';
+import { useWebSocket } from '../contexts/WebSocketContext';
 import Link from 'next/link';
-import { Navbar, NavbarBrand, NavbarContent, NavbarItem, NavbarMenuToggle, NavbarMenu, NavbarMenuItem, Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem } from '@nextui-org/react';
-import { Activity, TrendingUp, Wallet, Settings, Monitor, Home, Menu, Zap, Globe } from 'lucide-react';
+import { Navbar, NavbarBrand, NavbarContent, NavbarItem, NavbarMenuToggle, NavbarMenu, NavbarMenuItem, Button, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Chip } from '@nextui-org/react';
+import { Activity, TrendingUp, Wallet, Settings, Monitor, Home, Menu, Zap, Globe, Wifi, WifiOff } from 'lucide-react';
 import ThemeToggle from './ThemeToggle';
 
 export default function Navigation() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const pathname = usePathname();
   const { language, setLanguage, t } = useLanguage();
+  const { connected } = useWebSocket();
 
   const menuItems = [
     {
@@ -31,6 +33,12 @@ export default function Navigation() {
       href: '/wallets',
       icon: Wallet,
       description: t('wallets.subtitle')
+    },
+    {
+      name: 'BianDEX',
+      href: '/dex',
+      icon: Activity,
+      description: 'Decentralized Exchange'
     },
     {
       name: t('nav.monitoring'),
@@ -124,10 +132,25 @@ export default function Navigation() {
             
             {/* Dark Mode Toggle */}
             <ThemeToggle />
-            
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-gray-600 dark:text-gray-300">System Online</span>
+
+            {/* Connection Status */}
+            <Chip
+              variant="flat"
+              color={connected ? "success" : "danger"}
+              size="sm"
+              startContent={connected ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+              className="hidden md:flex"
+            >
+              {connected ? t('nav.connected') || 'Connected' : t('nav.disconnected') || 'Disconnected'}
+            </Chip>
+
+            {/* Mobile Connection Indicator */}
+            <div className="flex md:hidden items-center">
+              {connected ? (
+                <Wifi className="h-4 w-4 text-green-500" />
+              ) : (
+                <WifiOff className="h-4 w-4 text-red-500" />
+              )}
             </div>
           </div>
         </NavbarItem>

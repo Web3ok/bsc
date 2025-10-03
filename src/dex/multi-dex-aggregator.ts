@@ -348,7 +348,15 @@ export class MultiDEXAggregator {
           gasUsed,
         });
 
-        totalGasUsed += BigInt(gasUsed);
+        // Safely accumulate gas used
+        try {
+          const gasValue = gasUsed && gasUsed !== '0' ? BigInt(gasUsed) : BigInt(0);
+          totalGasUsed += gasValue;
+        } catch (gasError) {
+          logger.warn({ gasUsed, error: gasError }, 'Failed to accumulate gas used');
+        }
+
+        // Safely accumulate trade value
         try {
           totalValue += parseUnits(amountOut, 18);
         } catch (valueError) {

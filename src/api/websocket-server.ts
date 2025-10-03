@@ -1,14 +1,12 @@
 import WebSocket from 'ws';
 import http from 'http';
 import { logger } from '../utils/logger';
-import { monitoringServer } from '../monitor/server';
 import { healthMonitor } from '../monitor/health';
-import { metricsCollector } from '../monitor/metrics';
 import { tradingStatsService } from '../services/trading-stats-service';
-import { dexDataService } from '../services/dex-data-service';
 
 export interface WebSocketMessage {
   type: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any;
   timestamp: string;
 }

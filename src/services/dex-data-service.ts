@@ -216,12 +216,8 @@ export class DEXDataService {
         }
       }
 
-      // Method 2: Try PancakeSwap Subgraph
-      const subgraphData = await this.queryPancakeSwapSubgraph(symbol);
-      if (subgraphData?.volume24hUSD) {
-        return Math.round(subgraphData.volume24hUSD).toString();
-      }
-
+      // Method 2: PancakeSwap Subgraph is deprecated, skip
+      // Fall through to error
       throw new Error('No real data source available');
     } catch (error) {
       logger.debug({ error, symbol }, 'Real volume fetch failed, using fallback');
@@ -268,13 +264,8 @@ export class DEXDataService {
 
   private async fetchRealDEXVolume(): Promise<string> {
     try {
-      // Method 1: Query PancakeSwap total volume
-      const pancakeData = await this.queryPancakeSwapGlobalData();
-      if (pancakeData?.totalVolume24hUSD) {
-        return Math.round(pancakeData.totalVolume24hUSD).toString();
-      }
-
-      // Method 2: Try aggregating top pairs
+      // Method 1: PancakeSwap Subgraph is deprecated, skip
+      // Method 2: Try aggregating top pairs from DexScreener
       const topPairsVolume = await this.aggregateTopPairsVolume();
       if (topPairsVolume) {
         return Math.round(topPairsVolume).toString();
@@ -287,152 +278,18 @@ export class DEXDataService {
     }
   }
 
+  // DEPRECATED: PancakeSwap Subgraph endpoint has been removed by TheGraph
+  // Kept for reference only, not used in production
   private async queryPancakeSwapSubgraph(symbol: string): Promise<any> {
-    try {
-      // PancakeSwap V3 Subgraph endpoint
-      const subgraphUrl = 'https://api.thegraph.com/subgraphs/name/pancakeswap/exchange-v3-bsc';
-      
-      // Map token symbols to addresses for queries
-      const tokenAddresses: Record<string, string> = {
-        'BNB': this.TOKEN_ADDRESSES.WBNB,
-        'WBNB': this.TOKEN_ADDRESSES.WBNB,
-        'BUSD': this.TOKEN_ADDRESSES.BUSD,
-        'USDT': this.TOKEN_ADDRESSES.USDT,
-        'CAKE': this.TOKEN_ADDRESSES.CAKE,
-        'USDC': this.TOKEN_ADDRESSES.USDC
-      };
-
-      const tokenAddress = tokenAddresses[symbol];
-      if (!tokenAddress) {
-        logger.debug({ symbol }, 'Token address not found for symbol');
-        return null;
-      }
-
-      // GraphQL query to get token volume
-      const query = `{
-        token(id: "${tokenAddress.toLowerCase()}") {
-          id
-          symbol
-          name
-          volumeUSD
-          txCount
-          totalValueLocked
-          tokenDayData(first: 1, orderBy: date, orderDirection: desc) {
-            date
-            volumeUSD
-            priceUSD
-          }
-        }
-      }`;
-
-      // Make POST request for GraphQL
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
-      
-      try {
-        const response = await fetch(subgraphUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({ query }),
-          signal: controller.signal,
-        });
-        
-        clearTimeout(timeoutId);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.data?.token) {
-          const tokenData = data.data.token;
-          const dayData = tokenData.tokenDayData?.[0];
-          
-          return {
-            symbol: tokenData.symbol,
-            volume24hUSD: dayData?.volumeUSD ? parseFloat(dayData.volumeUSD) : null,
-            priceUSD: dayData?.priceUSD ? parseFloat(dayData.priceUSD) : null,
-            tvl: tokenData.totalValueLocked ? parseFloat(tokenData.totalValueLocked) : null
-          };
-        }
-        
-        return null;
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    } catch (error) {
-      logger.debug({ error, symbol }, 'PancakeSwap subgraph query failed');
-      return null;
-    }
+    logger.debug({ symbol }, 'PancakeSwap Subgraph is deprecated and no longer available');
+    return null;
   }
 
+  // DEPRECATED: PancakeSwap Subgraph endpoint has been removed by TheGraph
+  // Kept for reference only, not used in production
   private async queryPancakeSwapGlobalData(): Promise<any> {
-    try {
-      // PancakeSwap V3 Subgraph endpoint
-      const subgraphUrl = 'https://api.thegraph.com/subgraphs/name/pancakeswap/exchange-v3-bsc';
-      
-      // GraphQL query to get global DEX statistics
-      const query = `{
-        pancakeFactories(first: 1) {
-          id
-          totalVolumeUSD
-          totalValueLockedUSD
-          txCount
-          pairCount
-        }
-        pancakeDayDatas(first: 1, orderBy: date, orderDirection: desc) {
-          date
-          dailyVolumeUSD
-          totalVolumeUSD
-          totalLiquidityUSD
-        }
-      }`;
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), this.REQUEST_TIMEOUT);
-      
-      try {
-        const response = await fetch(subgraphUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({ query }),
-          signal: controller.signal,
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.data?.pancakeFactories?.[0] && data.data?.pancakeDayDatas?.[0]) {
-          const factory = data.data.pancakeFactories[0];
-          const dayData = data.data.pancakeDayDatas[0];
-          
-          return {
-            totalVolume24hUSD: dayData.dailyVolumeUSD ? parseFloat(dayData.dailyVolumeUSD) : null,
-            totalVolumeUSD: factory.totalVolumeUSD ? parseFloat(factory.totalVolumeUSD) : null,
-            totalValueLockedUSD: factory.totalValueLockedUSD ? parseFloat(factory.totalValueLockedUSD) : null,
-            pairCount: factory.pairCount ? parseInt(factory.pairCount) : null,
-            txCount: factory.txCount ? parseInt(factory.txCount) : null
-          };
-        }
-        
-        return null;
-      } finally {
-        clearTimeout(timeoutId);
-      }
-    } catch (error) {
-      logger.debug({ error }, 'PancakeSwap global data query failed');
-      return null;
-    }
+    logger.debug('PancakeSwap Subgraph is deprecated and no longer available');
+    return null;
   }
 
   private async getHistoricalPrice(symbol: string): Promise<any> {

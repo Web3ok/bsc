@@ -1,0 +1,37 @@
+{
+  "name": "contracts-project",
+  "version": "1.0.0",
+  "description": "BianDEX - Production-grade DEX on BSC",
+  "main": "index.js",
+  "scripts": {
+    "test": "npx hardhat test",
+    "test:gas": "REPORT_GAS=true npx hardhat test",
+    "compile": "npx hardhat compile",
+    "deploy:local": "npx hardhat run scripts/deploy-local.js --network localhost",
+    "deploy:testnet": "npx hardhat run scripts/deploy-bsc.js --network bsc_testnet",
+    "deploy:mainnet": "npx hardhat run scripts/deploy-bsc.js --network bsc_mainnet",
+    "deploy:governance": "npx hardhat run scripts/deploy-governance.js",
+    "deploy:advanced": "npx hardhat run scripts/deploy-advanced.js",
+    "deploy:all:testnet": "npm run deploy:testnet && npm run deploy:governance -- --network bsc_testnet && npm run deploy:advanced -- --network bsc_testnet",
+    "gas-analysis": "npx hardhat run scripts/gas-analysis.js --network hardhat",
+    "node": "npx hardhat node",
+    "clean": "npx hardhat clean",
+    "verify": "npx hardhat verify"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
+    "@nomicfoundation/hardhat-network-helpers": "^1.1.0",
+    "@nomicfoundation/hardhat-verify": "^2.1.1",
+    "@openzeppelin/contracts": "^5.4.0",
+    "chai": "^4.5.0",
+    "dotenv": "^17.2.3",
+    "hardhat": "^2.26.3"
+  },
+  "dependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.1.0",
+    "ethers": "^6.15.0"
+  }
+}

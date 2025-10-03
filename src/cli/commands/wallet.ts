@@ -79,7 +79,7 @@ export function walletCommands(program: Command, logger: Logger) {
 
         await walletManager.loadWallets();
 
-        let wallets = options.group ? 
+        const wallets = options.group ? 
           walletManager.getWalletsByGroup(options.group) : 
           walletManager.getAllWallets();
 

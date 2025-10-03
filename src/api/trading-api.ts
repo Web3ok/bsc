@@ -218,7 +218,7 @@ export class TradingAPI {
     // 批量交易
     this.router.post('/batch', async (req: Request, res: Response) => {
       try {
-        const { trades, strategy, maxConcurrent } = req.body;
+        const { trades } = req.body;
 
         if (!trades || !Array.isArray(trades) || trades.length === 0) {
           return res.status(400).json({
@@ -257,6 +257,7 @@ export class TradingAPI {
     tokenOut: string,
     amountIn: string,
     slippage: number
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ): Promise<any> {
     try {
       // 创建Router合约实例
@@ -379,7 +380,9 @@ export class TradingAPI {
     amountIn: string;
     slippage: number;
     walletAddress: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     quote?: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   }): Promise<any> {
     const { tokenIn, tokenOut, amountIn, slippage, walletAddress } = params;
 
@@ -549,7 +552,7 @@ export class TradingAPI {
   private async estimateGas(
     tokenIn: string,
     tokenOut: string,
-    amountIn: bigint
+    _amountIn: bigint
   ): Promise<bigint> {
     try {
       // 简化的Gas估算
@@ -586,7 +589,7 @@ export class TradingAPI {
     return { impact, category };
   }
 
-  private generateRecommendation(priceImpact: number, slippage: number): string {
+  private generateRecommendation(priceImpact: number, _slippage: number): string {
     if (priceImpact > 5) {
       return 'WARNING: Very high price impact detected. Consider reducing trade size or splitting into multiple trades.';
     } else if (priceImpact > 3) {
