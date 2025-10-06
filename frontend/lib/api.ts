@@ -1,6 +1,6 @@
 import { toast } from 'react-hot-toast';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3010';
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10001';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -205,6 +205,39 @@ class ApiClient {
     });
   }
 
+  async importWallets(wallets: Array<{ privateKey: string; label?: string; group?: string }>): Promise<ApiResponse<any>> {
+    return this.request('/api/v1/wallets/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        privateKeys: wallets.map(w => w.privateKey),
+        config: {
+          labels: wallets.map(w => w.label),
+          group: wallets[0]?.group,
+        },
+      }),
+    });
+  }
+
+  async importWalletsFromCSV(csvData: string): Promise<ApiResponse<any>> {
+    return this.request('/api/v1/wallets/import-csv', {
+      method: 'POST',
+      body: JSON.stringify({ csvData }),
+    });
+  }
+
+  async batchTransfer(config: {
+    type: 'one-to-one' | 'one-to-many' | 'many-to-many';
+    fromAddresses: string[];
+    toAddresses: string[];
+    amount: string;
+    tokenAddress?: string;
+  }): Promise<ApiResponse<any>> {
+    return this.request('/api/v1/wallets/batch-transfer', {
+      method: 'POST',
+      body: JSON.stringify(config),
+    });
+  }
+
   // Market data endpoints
   async getMarketData(): Promise<ApiResponse<any>> {
     return this.request<any>('/api/market/overview');
@@ -249,6 +282,9 @@ export const {
   getWallets,
   getWalletBalance,
   generateWallets,
+  importWallets,
+  importWalletsFromCSV,
+  batchTransfer,
   getMarketData,
   getTokenPrices,
   getRiskMetrics,

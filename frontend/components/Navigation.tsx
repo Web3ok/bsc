@@ -35,12 +35,6 @@ export default function Navigation() {
       description: t('wallets.subtitle')
     },
     {
-      name: 'BianDEX',
-      href: '/dex',
-      icon: Activity,
-      description: 'Decentralized Exchange'
-    },
-    {
       name: t('nav.monitoring'),
       href: '/monitoring',
       icon: Monitor,

@@ -45,6 +45,7 @@ cp frontend/.env.example frontend/.env.local
 
 **终端 1 - 后端 API**:
 ```bash
+# ⚠️ 默认启用鉴权；仅在本地调试时才临时禁用
 NODE_ENV=development DISABLE_AUTH=true JWT_SECRET=dev-secret-key-for-testing-only-256bits-long PORT=10001 npm run server:dev
 ```
 
@@ -79,6 +80,14 @@ PORT=10002 npm run dev
 - RainbowKit v2.2.1
 - MetaMask
 - WalletConnect v2
+- 后端 API 默认启用 JWT 鉴权
+
+#### 🔐 认证流程
+1. `POST /api/auth/nonce` 获取签名随机数（响应内含完整签名文案）
+2. 使用钱包对 `Sign in to BSC Trading Bot\nAddress: {address}\nNonce: {nonce}` 进行签名
+3. `POST /api/auth/login` 提交 `walletAddress + nonce + signature` 换取 JWT
+4. 所有 `/api/v1/*` 以及 `/api/trading` 路径均需携带 `Authorization: Bearer <token>` 访问
+5. 开发调试可通过 `.env` 显式设置 `DISABLE_AUTH=true` 或 `ALLOW_DEV_LOGIN=true` 临时跳过鉴权
 
 ### ✅ 国际化 (100%)
 - 中文 (200+ 翻译键)
@@ -126,6 +135,7 @@ PORT=10002 npm run dev
 - **Tailwind CSS** 3.4.1
 - **RainbowKit** + **wagmi** (钱包连接)
 - **TypeScript** 5.3.3
+- **实时数据源**：整合 CoinGecko API，Analytics 每 30 秒自动刷新，提供缓存与降级机制
 
 ### 区块链
 - **BSC (BNB Chain)**
@@ -146,6 +156,7 @@ PORT=10002 npm run dev
 ### 配置文件
 - **`.env`** - 后端环境变量 (RPC, 数据库, JWT)
 - **`frontend/.env.local`** - 前端环境变量 (API URL, WalletConnect)
+- WebSocket 默认指向 `ws://localhost:10001/ws`，可通过 `NEXT_PUBLIC_WS_URL` 调整
 - **`package.json`** - 后端依赖和脚本
 - **`frontend/package.json`** - 前端依赖和脚本
 

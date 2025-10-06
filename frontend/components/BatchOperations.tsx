@@ -7,8 +7,9 @@ import {
   Table, TableHeader, TableColumn, TableBody, TableRow, TableCell,
   Chip, Progress, Textarea, Tabs, Tab, Divider
 } from '@nextui-org/react';
-import { Play, Pause, Square, RotateCcw, Settings, TrendingUp, TrendingDown, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Square, RotateCcw, Settings, TrendingUp, TrendingDown, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface BatchOperation {
   id: string;
@@ -37,24 +38,44 @@ export default function BatchOperations() {
   const [operations, setOperations] = useState<BatchOperation[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [selectedWallets, setSelectedWallets] = useState<string[]>([]);
+  const [availableWallets, setAvailableWallets] = useState<Array<{address: string; label: string; balance: string}>>([]);
   const [progress, setProgress] = useState(0);
   const [strategy, setStrategy] = useState<BatchStrategy | null>(null);
+  const [showWalletPicker, setShowWalletPicker] = useState(false);
+  const { token } = useAuth();
 
   // Modal states
   const { isOpen: isCreateOpen, onOpen: onCreateOpen, onClose: onCreateClose } = useDisclosure();
   const { isOpen: isStrategyOpen, onOpen: onStrategyOpen, onClose: onStrategyClose } = useDisclosure();
 
+  // Popular tokens configuration
+  const POPULAR_TOKENS = [
+    { symbol: 'CAKE', name: 'PancakeSwap', address: '0x0E09FaBB73Bd3Ade0a17ECC321fD13a19e81cE82', icon: '🥞' },
+    { symbol: 'BUSD', name: 'Binance USD', address: '0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56', icon: '💵' },
+    { symbol: 'USDT', name: 'Tether USD', address: '0x55d398326f99059fF775485246999027B3197955', icon: '💵' },
+    { symbol: 'USDC', name: 'USD Coin', address: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', icon: '💰' },
+    { symbol: 'ETH', name: 'Ethereum', address: '0x2170Ed0880ac9A755fd29B2688956BD959F933F8', icon: '⚡' },
+    { symbol: 'BTC', name: 'Bitcoin', address: '0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c', icon: '₿' },
+  ];
+
   // Form states
   const [batchConfig, setBatchConfig] = useState({
     operationType: 'buy',
-    tokenIn: '0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd', // WBNB
-    tokenOut: '0x78867BbEeF44f2326bF8DDd1941a4439382EF2A7', // BUSD
+    tokenIn: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', // WBNB (mainnet)
+    tokenOut: '', // Custom token address
     amountIn: '0.01',
     slippage: '1.0',
     maxConcurrency: 3,
     delayBetweenOps: 1000,
     riskCheck: true
   });
+
+  const [tokenInfo, setTokenInfo] = useState<{
+    symbol?: string;
+    name?: string;
+    isValid: boolean;
+    isLoading: boolean;
+  }>({ isValid: false, isLoading: false });
 
   const [newStrategy, setNewStrategy] = useState({
     name: '',
@@ -67,7 +88,65 @@ export default function BatchOperations() {
 
   useEffect(() => {
     fetchOperations();
+    fetchAvailableWallets();
   }, []);
+
+  const fetchAvailableWallets = async () => {
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:10001';
+      const response = await fetch(`${apiUrl}/api/v1/wallets/list`);
+      const result = await response.json();
+
+      if (result.success && result.data) {
+        const wallets = result.data.wallets.map((w: any) => ({
+          address: w.address,
+          label: w.label || w.address.slice(0, 10),
+          balance: w.balance || '0'
+        }));
+        setAvailableWallets(wallets);
+      }
+    } catch (error) {
+      console.error('Failed to fetch wallets:', error);
+    }
+  };
+
+  // Validate token address in real-time
+  useEffect(() => {
+    const validateToken = async () => {
+      if (!batchConfig.tokenOut || !batchConfig.tokenOut.match(/^0x[a-fA-F0-9]{40}$/)) {
+        setTokenInfo({ isValid: false, isLoading: false });
+        return;
+      }
+
+      setTokenInfo({ isValid: false, isLoading: true });
+
+      try {
+        const { ethers } = await import('ethers');
+        const provider = new ethers.JsonRpcProvider('https://bsc-dataseed.binance.org/');
+        const contract = new ethers.Contract(
+          batchConfig.tokenOut,
+          ['function symbol() view returns (string)', 'function name() view returns (string)'],
+          provider
+        );
+
+        const [symbol, name] = await Promise.all([
+          contract.symbol(),
+          contract.name()
+        ]);
+
+        setTokenInfo({ symbol, name, isValid: true, isLoading: false });
+        toast.success(`代币验证成功: ${symbol} (${name})`);
+      } catch (error) {
+        setTokenInfo({ isValid: false, isLoading: false });
+        toast.error('无法验证代币合约，请检查地址');
+      }
+    };
+
+    if (batchConfig.tokenOut) {
+      const timer = setTimeout(validateToken, 800); // Debounce
+      return () => clearTimeout(timer);
+    }
+  }, [batchConfig.tokenOut]);
 
   const fetchOperations = async () => {
     try {
@@ -113,6 +192,12 @@ export default function BatchOperations() {
         return;
       }
 
+      // Validate token address
+      if (!batchConfig.tokenOut || !batchConfig.tokenOut.match(/^0x[a-fA-F0-9]{40}$/)) {
+        toast.error('请输入有效的代币合约地址');
+        return;
+      }
+
       const newOperations: Omit<BatchOperation, 'id' | 'status' | 'progress' | 'createdAt'>[] = 
         selectedWallets.map(walletAddress => ({
           type: batchConfig.operationType as 'buy' | 'sell',
@@ -123,9 +208,17 @@ export default function BatchOperations() {
         }));
 
       // Call batch trading API
+      if (!token) {
+        toast.error('Authenticate your wallet before creating batch operations');
+        return;
+      }
+
       const response = await fetch(`${API_URL}/api/v1/batch/operations`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           operations: newOperations,
           config: {
@@ -366,6 +459,66 @@ export default function BatchOperations() {
                 <SelectItem key="sell" value="sell" textValue="卖出 (代币 → BNB)">卖出 (代币 → BNB)</SelectItem>
               </Select>
 
+              <div className="space-y-2">
+                <label className="text-sm font-medium">代币合约地址</label>
+
+                {/* Popular Tokens Quick Select */}
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <span className="text-xs text-gray-500 self-center">快速选择：</span>
+                  {POPULAR_TOKENS.slice(0, 6).map(token => (
+                    <Button
+                      key={token.symbol}
+                      size="sm"
+                      variant="flat"
+                      className="h-7"
+                      onPress={() => {
+                        setBatchConfig({ ...batchConfig, tokenOut: token.address });
+                        toast.success(`已选择 ${token.symbol}`);
+                      }}
+                    >
+                      <span className="text-base">{token.icon}</span>
+                      <span className="ml-1">{token.symbol}</span>
+                    </Button>
+                  ))}
+                </div>
+
+                {/* Token Address Input */}
+                <Input
+                  placeholder="0x... 或使用上方快捷按钮"
+                  value={batchConfig.tokenOut}
+                  onChange={(e) => setBatchConfig({ ...batchConfig, tokenOut: e.target.value })}
+                  description="输入要交易的 BEP-20 代币合约地址"
+                  isRequired
+                  endContent={
+                    tokenInfo.isLoading ? (
+                      <div className="animate-spin h-4 w-4 border-2 border-primary border-t-transparent rounded-full" />
+                    ) : tokenInfo.isValid ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : batchConfig.tokenOut && !tokenInfo.isValid ? (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    ) : null
+                  }
+                />
+
+                {/* Token Info Display */}
+                {tokenInfo.isValid && (
+                  <Card className="bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+                    <CardBody className="py-2">
+                      <div className="flex items-center gap-2 text-sm">
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                        <span className="font-semibold text-green-700 dark:text-green-400">
+                          {tokenInfo.symbol}
+                        </span>
+                        <span className="text-gray-600 dark:text-gray-400">-</span>
+                        <span className="text-gray-700 dark:text-gray-300">
+                          {tokenInfo.name}
+                        </span>
+                      </div>
+                    </CardBody>
+                  </Card>
+                )}
+              </div>
+
               <div className="grid grid-cols-2 gap-4">
                 <Input
                   label="每次操作数量"
@@ -402,15 +555,119 @@ export default function BatchOperations() {
                 />
               </div>
 
-              <Textarea
-                label="选择钱包"
-                placeholder="输入钱包地址（每行一个）"
-                rows={4}
-                value={selectedWallets.join('\n')}
-                onChange={(e) => setSelectedWallets(
-                  e.target.value.split('\n').filter(addr => addr.trim())
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-medium">选择钱包</label>
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    color="primary"
+                    onPress={() => setShowWalletPicker(!showWalletPicker)}
+                  >
+                    {showWalletPicker ? '手动输入' : '从列表选择'} ({availableWallets.length} 个可用)
+                  </Button>
+                </div>
+
+                {showWalletPicker ? (
+                  <Card className="max-h-80 overflow-y-auto">
+                    <CardBody>
+                      <div className="space-y-2">
+                        <div className="flex gap-2 mb-3">
+                          <Button
+                            size="sm"
+                            variant="flat"
+                            onPress={() => setSelectedWallets(availableWallets.map(w => w.address))}
+                          >
+                            全选 ({availableWallets.length})
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="flat"
+                            onPress={() => setSelectedWallets([])}
+                          >
+                            清空
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="flat"
+                            color="success"
+                            onPress={() => setSelectedWallets(
+                              availableWallets.filter(w => parseFloat(w.balance) > 0).map(w => w.address)
+                            )}
+                          >
+                            选择有余额的 ({availableWallets.filter(w => parseFloat(w.balance) > 0).length})
+                          </Button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-2">
+                          {availableWallets.map(wallet => (
+                            <div
+                              key={wallet.address}
+                              className={`p-3 rounded-lg border-2 cursor-pointer transition-all ${
+                                selectedWallets.includes(wallet.address)
+                                  ? 'border-primary bg-primary/10'
+                                  : 'border-gray-200 dark:border-gray-700 hover:border-primary/50'
+                              }`}
+                              onClick={() => {
+                                if (selectedWallets.includes(wallet.address)) {
+                                  setSelectedWallets(selectedWallets.filter(a => a !== wallet.address));
+                                } else {
+                                  setSelectedWallets([...selectedWallets, wallet.address]);
+                                }
+                              }}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
+                                    selectedWallets.includes(wallet.address)
+                                      ? 'bg-primary border-primary'
+                                      : 'border-gray-300'
+                                  }`}>
+                                    {selectedWallets.includes(wallet.address) && (
+                                      <CheckCircle className="h-3 w-3 text-white" />
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="font-mono text-sm font-medium">
+                                      {wallet.address.slice(0, 10)}...{wallet.address.slice(-8)}
+                                    </p>
+                                    <p className="text-xs text-gray-500">{wallet.label}</p>
+                                  </div>
+                                </div>
+                                <Chip
+                                  size="sm"
+                                  color={parseFloat(wallet.balance) > 0 ? 'success' : 'default'}
+                                  variant="flat"
+                                >
+                                  {parseFloat(wallet.balance).toFixed(4)} BNB
+                                </Chip>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {selectedWallets.length > 0 && (
+                          <div className="mt-3 p-3 bg-primary/10 rounded-lg">
+                            <p className="text-sm font-medium text-primary">
+                              已选择 {selectedWallets.length} 个钱包
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </CardBody>
+                  </Card>
+                ) : (
+                  <Textarea
+                    placeholder="输入钱包地址（每行一个）"
+                    rows={4}
+                    value={selectedWallets.join('\n')}
+                    onChange={(e) => setSelectedWallets(
+                      e.target.value.split('\n').filter(addr => addr.trim())
+                    )}
+                    description={`已输入 ${selectedWallets.length} 个地址`}
+                  />
                 )}
-              />
+              </div>
             </div>
           </ModalBody>
           <ModalFooter>

@@ -44,7 +44,7 @@ BSC Trading Bot is an enterprise-grade automated trading platform for Binance Sm
 - **Complete DEX** - Swap, liquidity, farming
 - **LP Mining** - Stake LP tokens for rewards
 - **DAO Governance** - Community decision making
-- **Analytics** - Real-time metrics and charts
+- **Analytics** - CoinGecko-backed real-time metrics with automatic fallback
 - **Audited Contracts** - 12 contracts, 3500+ LOC
 
 ### 🎨 Platform
@@ -82,6 +82,7 @@ cp .env.example .env
 npm run migrate
 
 # 5. Start services
+# Backend defaults to authenticated mode. Set DISABLE_AUTH=true only when you explicitly want to bypass auth in local debugging.
 npm run server:dev          # Terminal 1: Backend
 cd frontend && npm run dev  # Terminal 2: Frontend
 ```
@@ -119,6 +120,17 @@ CHAIN_ID=97
 ```
 
 See [.env.example](.env.example) for all options.
+
+### Authentication Flow
+1. `POST /api/auth/nonce` to obtain a one-time nonce (response includes the exact message to sign).
+2. Sign `Sign in to BSC Trading Bot\nAddress: {wallet}\nNonce: {nonce}` with the target wallet.
+3. `POST /api/auth/login` with `walletAddress`, `nonce`, and `signature` to receive a JWT.
+4. Include `Authorization: Bearer <token>` for all `/api/v1/*` and `/api/trading` endpoints.
+5. Development shortcuts: explicitly set `DISABLE_AUTH=true` or `ALLOW_DEV_LOGIN=true` when you need to bypass auth locally.
+
+### WebSocket Endpoint
+- Backend WebSocket server listens on `ws://<host>:10001/ws` by default.
+- Set `NEXT_PUBLIC_WS_URL` if the frontend should connect to a custom WebSocket endpoint.
 
 ---
 

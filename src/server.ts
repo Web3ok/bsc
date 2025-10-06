@@ -3,11 +3,10 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import compression from 'compression';
-import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
+import { createServer, Server as HttpServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
 
-import { configManager } from './config';
 import { logger } from './utils/logger';
 import { WalletManager, WalletInfo } from './wallet';
 import { healthMonitor } from './monitor/health';
@@ -16,7 +15,7 @@ import { database } from './persistence/database';
 import { TradingService } from './dex/trading';
 
 // API Routes
-// import { BatchTradingAPI } from './api/batch-trading-api'; // Temporarily disabled
+import { BatchTradingAPI } from './api/batch-trading-api';
 import { MarketDataAPI } from './api/market-data-api';
 import { WalletManagementAPI } from './api/wallet-management-api';
 import { StrategyManagementAPI } from './api/strategy-management-api';
@@ -24,16 +23,51 @@ import { RiskManagementAPI } from './api/risk-management-api';
 import { SystemAPI } from './api/system-api';
 
 // Authentication and Rate Limiting
-import { authenticate, AuthenticatedRequest, createLoginEndpoint, authMiddleware } from './middleware/auth';
+import { authenticate, createLoginEndpoint, createAuthMiddleware } from './middleware/auth';
 import { generalRateLimit, tradingRateLimit, authRateLimit } from './middleware/rateLimit';
 
 // Batch Operations and New Services
-import { batchExecutor } from './services/batch-executor';
 import { blockchainMonitor } from './services/blockchain-monitor';
 import { auditService } from './services/audit-service';
 import { walletBalanceService } from './services/wallet-balance-service';
 import { priceService } from './services/price-service';
 import { MonitoringService } from './services/monitoring-service';
+import { formatError } from './utils/error-handler';
+import type { TokenBalance } from './services/wallet-service';
+import type { PriceData } from './services/price-service';
+
+interface PublicWallet {
+  address: string;
+  label: string | null;
+  balance: string;
+  nonce: number;
+  status: 'active' | 'inactive' | 'suspended' | 'archived';
+  group: string | null;
+  tier: WalletInfo['tier'] | null;
+  derivationIndex: number | null;
+  transactions24h: number;
+  lastActivity: string;
+  createdAt: string;
+  tokenBalances: TokenBalance[];
+}
+
+interface BatchOperationRequest {
+  type: string;
+  walletAddress: string;
+  tokenIn: string;
+  tokenOut: string;
+  amountIn: string | number;
+}
+
+interface MonitoringResponseData {
+  message: string;
+  status: 'started' | 'updated';
+  addedAddresses: string[];
+  addedCount: number;
+  totalWatched: number;
+  skippedAddresses?: string[];
+  skippedCount?: number;
+}
 
 interface SystemSettings {
   trading: {
@@ -56,7 +90,7 @@ interface SystemSettings {
 
 export class APIServer {
   private app: express.Application;
-  private server: any;
+  private server: HttpServer | null = null;
   private wss: WebSocketServer | null = null;
   private port: number;
   private walletManager: WalletManager;
@@ -95,6 +129,29 @@ export class APIServer {
         heartbeat_interval_seconds: 30,
       },
     };
+  }
+
+  private getQueryString(value: unknown): string | undefined {
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      const first = value[0];
+      return typeof first === 'string' ? first : undefined;
+    }
+
+    return undefined;
+  }
+
+  private getQueryNumber(value: unknown, defaultValue: number): number {
+    const stringValue = this.getQueryString(value);
+    if (!stringValue) {
+      return defaultValue;
+    }
+
+    const parsed = Number(stringValue);
+    return Number.isFinite(parsed) ? parsed : defaultValue;
   }
 
   private setupMiddleware(): void {
@@ -220,9 +277,9 @@ export class APIServer {
     // API v1 routes with unified authentication
     const apiV1 = express.Router();
 
-    // Apply authentication middleware to all v1 routes (temporarily disabled for testing)
-    // const authMiddleware = createAuthMiddleware(['admin', 'trader', 'viewer']);
-    // apiV1.use(authMiddleware);
+    // Apply authentication middleware to all v1 routes
+    const v1AuthMiddleware = createAuthMiddleware(['admin', 'trader', 'viewer']);
+    apiV1.use(v1AuthMiddleware);
 
     // Mount API modules
     // Import TradingAPI
@@ -233,6 +290,7 @@ export class APIServer {
     const { BatchOperationsAPI } = require('./api/batch-operations-api');
     const batchOperationsAPI = new BatchOperationsAPI();
 
+    const batchTradingAPI = new BatchTradingAPI();
     const marketDataAPI = new MarketDataAPI();
     const walletManagementAPI = new WalletManagementAPI();
     const strategyManagementAPI = new StrategyManagementAPI();
@@ -242,6 +300,7 @@ export class APIServer {
     // Mount routes (authentication applied at router level above)
     apiV1.use('/trading', tradingAPI.getRouter());
     apiV1.use('/batch', batchOperationsAPI.getRouter());
+    apiV1.use('/batch', batchTradingAPI.router);
     apiV1.use('/market', marketDataAPI.router);
     apiV1.use('/wallets', walletManagementAPI.getRouter());
     apiV1.use('/strategies', strategyManagementAPI.router);
@@ -252,11 +311,55 @@ export class APIServer {
     apiV1.use('/dex', marketDataAPI.router);
     apiV1.use('/tokens', marketDataAPI.router);
 
+    // Public price API for analytics dashboards (no auth required)
+    this.app.get('/api/prices', generalRateLimit, async (req, res) => {
+      try {
+        const symbolsParam = req.query.symbols as string | undefined;
+        const symbols = symbolsParam
+          ? symbolsParam.split(',').map((s) => s.trim()).filter(Boolean)
+          : ['BNB', 'WBNB', 'BUSD', 'USDT', 'USDC', 'CAKE'];
+
+        if (symbols.length === 0) {
+          return res.json({ success: true, data: { prices: [] } });
+        }
+
+        const uniqueSymbols = Array.from(new Set(symbols.map((s) => s.toUpperCase())));
+        const priceMap = await priceService.getMultiplePrices(uniqueSymbols);
+
+        const prices = uniqueSymbols.map((symbol) => {
+          const priceData = priceMap.get(symbol) || null;
+          return {
+            symbol,
+            priceUSD: priceData?.priceUSD ?? 0,
+            priceChange24h: priceData?.priceChange24h ?? 0,
+            volume24hUSD: priceData?.volume24hUSD ?? 0,
+            lastUpdated: priceData?.lastUpdated?.toISOString() ?? null,
+            dataSource: priceData?.dataSource ?? null,
+            isStale: priceData?.isStale ?? false
+          };
+        });
+
+        res.json({
+          success: true,
+          data: {
+            symbols: uniqueSymbols,
+            prices
+          }
+        });
+      } catch (error) {
+        logger.error({ error }, 'Failed to fetch price data');
+        res.status(500).json({
+          success: false,
+          message: 'Failed to fetch price data'
+        });
+      }
+    });
+
     this.setupLegacyCompatibleRoutes();
     this.app.use('/api/v1', apiV1);
 
     // Legacy trading routes (for backward compatibility)
-    this.app.use('/api/trading', tradingAPI.getRouter());
+    this.app.use('/api/trading', v1AuthMiddleware, tradingAPI.getRouter());
     
     // Add alerts endpoint directly
     this.app.get('/api/alerts', async (req, res) => {
@@ -768,7 +871,7 @@ export class APIServer {
         return res.status(400).json({ success: false, message: 'addresses must be a non-empty array' });
       }
 
-      const exported: any[] = [];
+      const exported: PublicWallet[] = [];
       const missing: string[] = [];
 
       for (const address of addresses) {
@@ -833,28 +936,45 @@ export class APIServer {
         }
 
         const quote = await tradingService.getQuote(tokenIn, tokenOut, amountIn, slippage);
-        
+
+        const routes = Array.isArray((quote as Partial<{ routes: string[] }>).routes)
+          ? (quote as Partial<{ routes: string[] }>).routes ?? []
+          : quote.path ?? [];
+        const gasEstimate = 'gasEstimate' in quote ? quote.gasEstimate : null;
+        const rawPriceImpact = (quote as { priceImpact?: unknown }).priceImpact;
+        let priceImpactPercent = 0;
+        if (
+          typeof rawPriceImpact === 'object' &&
+          rawPriceImpact !== null &&
+          'impact' in rawPriceImpact &&
+          typeof (rawPriceImpact as { impact: unknown }).impact === 'number'
+        ) {
+          priceImpactPercent = (rawPriceImpact as { impact: number }).impact;
+        } else if (typeof rawPriceImpact === 'number') {
+          priceImpactPercent = rawPriceImpact;
+        }
+
         res.json({
           success: true,
           data: {
             tokenIn: { 
               address: tokenIn, 
               amount: amountIn,
-              symbol: quote.tokenInSymbol 
+              symbol: quote.tokenIn?.symbol ?? ''
             },
             tokenOut: { 
               address: tokenOut, 
-              amount: quote.amountOut,
-              symbol: quote.tokenOutSymbol 
+              amount: quote.tokenOut?.amount ?? '0',
+              symbol: quote.tokenOut?.symbol ?? ''
             },
-            priceImpact: `${quote.priceImpact}%`,
+            priceImpact: `${priceImpactPercent}%`,
             slippageAnalysis: {
               recommended: slippage || 0.5,
               max: 5.0,
             },
-            routes: quote.routes || [],
-            gasEstimate: quote.gasEstimate,
-            minimumReceived: quote.minimumReceived
+            routes,
+            gasEstimate,
+            minimumReceived: quote.minimumReceived ?? quote.tokenOut?.amount ?? '0'
           },
         });
       } catch (error) {
@@ -910,7 +1030,10 @@ export class APIServer {
     this.registerLegacyRoute('GET', '/api/trading/history', async (req, res) => {
       try {
         // Real trading history implementation
-        const { limit = 50, offset = 0, address } = req.query;
+        const limit = this.getQueryNumber(req.query.limit, 50);
+        const offset = this.getQueryNumber(req.query.offset, 0);
+        const address = this.getQueryString(req.query.address);
+        const normalizedAddress = address ? address.toLowerCase() : undefined;
         
         try {
           // Get real trading history from database
@@ -939,13 +1062,13 @@ export class APIServer {
               'operation_type as type'
             ])
             .orderBy('created_at', 'desc')
-            .limit(Number(limit))
-            .offset(Number(offset));
+            .limit(limit)
+            .offset(offset);
           
-          if (address) {
+          if (normalizedAddress) {
             tradesQuery = tradesQuery.where(function() {
-              this.where('from_address', address.toLowerCase())
-                .orWhere('to_address', address.toLowerCase());
+              this.where('from_address', normalizedAddress)
+                .orWhere('to_address', normalizedAddress);
             });
           }
           
@@ -956,16 +1079,17 @@ export class APIServer {
           let countQuery = database.connection(tableName)
             .count('* as count');
           
-          if (address) {
+          if (normalizedAddress) {
             countQuery = countQuery.where(function() {
-              this.where('from_address', address.toLowerCase())
-                .orWhere('to_address', address.toLowerCase());
+              this.where('from_address', normalizedAddress)
+                .orWhere('to_address', normalizedAddress);
             });
           }
           
           const totalResult = await countQuery;
-          const total = Number((totalResult[0] as any)?.count || 0);
-          const totalPages = Math.ceil(total / Number(limit));
+          const total = this.extractCount(totalResult);
+          const safeLimit = Math.max(limit, 1);
+          const totalPages = Math.ceil(total / safeLimit);
           
           res.json({
             success: true,
@@ -989,12 +1113,12 @@ export class APIServer {
                 completedAt: trade.completed_at
               })),
               total,
-              page: Math.floor(Number(offset) / Number(limit)) + 1,
+              page: Math.floor(offset / safeLimit) + 1,
               totalPages
             },
             pagination: {
-              limit: Number(limit),
-              offset: Number(offset),
+              limit,
+              offset,
               total
             }
           });
@@ -1012,8 +1136,8 @@ export class APIServer {
             },
             message: 'Trading history unavailable. Database connection error.',
             pagination: {
-              limit: Number(limit),
-              offset: Number(offset),
+              limit,
+              offset,
               total: 0
             }
           });
@@ -1030,7 +1154,9 @@ export class APIServer {
     // Advanced Batch Operations API
     this.registerLegacyRoute('POST', '/api/v1/batch/operations', async (req, res) => {
       try {
-        const { operations, config } = req.body;
+        const body = this.isPlainObject(req.body) ? req.body : {};
+        const operations = body.operations;
+        const config = this.isPlainObject(body.config) ? body.config : undefined;
 
         if (!Array.isArray(operations) || operations.length === 0) {
           return res.status(400).json({
@@ -1039,25 +1165,34 @@ export class APIServer {
           });
         }
 
-        // Validate each operation
-        for (const op of operations) {
-          if (!op.type || !op.walletAddress || !op.tokenIn || !op.tokenOut || !op.amountIn) {
+        const validatedOperations: BatchOperationRequest[] = [];
+        for (const operation of operations) {
+          if (!this.isBatchOperationRequest(operation)) {
             return res.status(400).json({
               success: false,
               message: 'Each operation must have type, walletAddress, tokenIn, tokenOut, and amountIn'
             });
           }
+
+          const amountIn: string = typeof operation.amountIn === 'number'
+            ? operation.amountIn.toString()
+            : operation.amountIn;
+
+          validatedOperations.push({
+            ...operation,
+            amountIn,
+          });
         }
 
         // Generate operation IDs and prepare for batch execution
-        const batchOperations = operations.map((op: any, index: number) => ({
-          id: `op_${Date.now()}_${Buffer.from(`${op.type}_${index}_${Date.now()}`).toString('base64').slice(0, 9)}`,
-          type: op.type,
+        const batchOperations = validatedOperations.map((operation, index) => ({
+          id: `op_${Date.now()}_${Buffer.from(`${operation.type}_${index}_${Date.now()}`).toString('base64').slice(0, 9)}`,
+          type: operation.type,
           status: 'pending',
-          walletAddress: op.walletAddress,
-          tokenIn: op.tokenIn,
-          tokenOut: op.tokenOut,
-          amountIn: op.amountIn,
+          walletAddress: operation.walletAddress,
+          tokenIn: operation.tokenIn,
+          tokenOut: operation.tokenOut,
+          amountIn: operation.amountIn,
           progress: 0,
           createdAt: new Date().toISOString()
         }));
@@ -1070,9 +1205,9 @@ export class APIServer {
             operationIds: batchOperations.map(op => op.id),
             totalOperations: batchOperations.length,
             config: {
-              maxConcurrency: config?.maxConcurrency || 3,
-              delayBetweenOps: config?.delayBetweenOps || 1000,
-              slippage: config?.slippage || 1.0,
+              maxConcurrency: typeof config?.maxConcurrency === 'number' ? config.maxConcurrency : 3,
+              delayBetweenOps: typeof config?.delayBetweenOps === 'number' ? config.delayBetweenOps : 1000,
+              slippage: typeof config?.slippage === 'number' ? config.slippage : 1.0,
               riskCheck: config?.riskCheck !== false
             },
             operations: batchOperations
@@ -1197,9 +1332,10 @@ export class APIServer {
     // New Audit Service API endpoints
     this.registerLegacyRoute('GET', '/api/audit/report', async (req, res) => {
       try {
-        const { startDate, endDate } = req.query;
-        const start = startDate ? new Date(startDate as string) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-        const end = endDate ? new Date(endDate as string) : new Date();
+        const startDate = this.getQueryString(req.query.startDate);
+        const endDate = this.getQueryString(req.query.endDate);
+        const start = startDate ? new Date(startDate) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const end = endDate ? new Date(endDate) : new Date();
 
         const report = await auditService.generateAuditReport(start, end);
         
@@ -1219,16 +1355,17 @@ export class APIServer {
 
     this.registerLegacyRoute('GET', '/api/audit/suspicious', async (req, res) => {
       try {
-        const { limit = 100, offset = 0 } = req.query;
-        const suspicious = await auditService.getSuspiciousTransactions(Number(limit), Number(offset));
+        const limit = this.getQueryNumber(req.query.limit, 100);
+        const offset = this.getQueryNumber(req.query.offset, 0);
+        const suspicious = await auditService.getSuspiciousTransactions(limit, offset);
         
         res.json({
           success: true,
           data: {
             transactions: suspicious,
             total: suspicious.length,
-            limit: Number(limit),
-            offset: Number(offset)
+            limit,
+            offset
           }
         });
       } catch (error) {
@@ -1279,23 +1416,22 @@ export class APIServer {
         }
 
         const result = await blockchainMonitor.startMonitoring(addresses);
-        
-        const responseData: any = {
-          message: result.status === 'started' 
-            ? 'Monitoring started for specified wallets' 
+
+        const responseData: MonitoringResponseData = {
+          message: result.status === 'started'
+            ? 'Monitoring started for specified wallets'
             : result.addedAddresses.length > 0
               ? `Added ${result.addedAddresses.length} new addresses to existing monitoring`
               : 'No new addresses added (all were already being monitored)',
           status: result.status,
           addedAddresses: result.addedAddresses,
           addedCount: result.addedAddresses.length,
-          totalWatched: result.totalWatched
+          totalWatched: result.totalWatched,
         };
-        
-        // Always include skipped addresses when updating (even if empty array)
+
         if (result.status === 'updated') {
-          responseData.skippedAddresses = result.skippedAddresses || [];
-          responseData.skippedCount = (result.skippedAddresses || []).length;
+          responseData.skippedAddresses = result.skippedAddresses ?? [];
+          responseData.skippedCount = responseData.skippedAddresses.length;
         }
         
         res.json({
@@ -1372,14 +1508,14 @@ export class APIServer {
         }
 
         // Add warning if using fallback data
-        const response: any = {
+        const responsePayload: { success: true; data: PriceData; warning?: string; fallback?: true } = {
           success: true,
-          data: priceData
+          data: priceData,
         };
         
         if (priceData.dataSource === 'fallback_static') {
-          response.warning = 'Using static fallback price - external API unavailable';
-          response.fallback = true;
+          responsePayload.warning = 'Using static fallback price - external API unavailable';
+          responsePayload.fallback = true as const;
           logger.warn({ symbol, price: priceData.priceUSD }, 'Serving fallback price to client');
           
           // Trigger alert for fallback usage
@@ -1389,7 +1525,7 @@ export class APIServer {
           }
         }
         
-        res.json(response);
+        res.json(responsePayload);
       } catch (error) {
         logger.error({ error, symbol: req.params.symbol }, 'Failed to get price data');
         res.status(500).json({
@@ -1411,13 +1547,11 @@ export class APIServer {
         }
 
         const prices = await priceService.getMultiplePrices(symbols);
-        
+        const responseData = Object.fromEntries(prices.entries());
+
         res.json({
           success: true,
-          data: Array.from(prices.entries()).reduce((acc, [symbol, priceData]) => {
-            acc[symbol] = priceData;
-            return acc;
-          }, {} as Record<string, any>)
+          data: responseData,
         });
       } catch (error) {
         logger.error({ error }, 'Failed to get batch prices');
@@ -1434,11 +1568,12 @@ export class APIServer {
 
     this.registerLegacyRoute('PUT', '/api/settings', (req, res) => {
       const updates = req.body;
-      if (!updates || typeof updates !== 'object' || Array.isArray(updates)) {
+      if (!this.isPlainObject(updates)) {
         return res.status(400).json({ success: false, message: 'Invalid settings payload' });
       }
 
-      this.settings = this.mergeSettings(this.settings, updates) as SystemSettings;
+      const updatePayload: Record<string, unknown> = updates;
+      this.settings = this.mergeSettings(this.settings, updatePayload);
       res.json({ success: true, data: this.settings });
     });
 
@@ -1504,12 +1639,19 @@ export class APIServer {
     // Frontend-compatible wallet import
     this.registerLegacyRoute('POST', '/api/wallets/import', async (req, res) => {
       try {
-        const { type, content, password } = req.body;
+        const { type, content, password: _password } = req.body;
 
         if (!type || !content) {
           return res.status(400).json({ 
             success: false, 
             message: 'Type and content are required' 
+          });
+        }
+
+        if (typeof type !== 'string' || typeof content !== 'string') {
+          return res.status(400).json({
+            success: false,
+            message: 'Type and content must be strings'
           });
         }
 
@@ -1551,7 +1693,7 @@ export class APIServer {
             });
           }
         } else if (type === 'csv') {
-          const lines = content.split('\n').filter(line => line.trim());
+          const lines = content.split('\n').filter((line: string) => line.trim());
           for (let i = 1; i < lines.length; i++) { // Skip header
             const parts = lines[i].split(',');
             if (parts.length >= 2) {
@@ -1599,7 +1741,7 @@ export class APIServer {
 
   }
 
-  private async toPublicWallet(wallet: WalletInfo): Promise<any> {
+  private async toPublicWallet(wallet: WalletInfo): Promise<PublicWallet> {
     try {
       // Get real wallet data from the blockchain
       const walletData = await walletService.getWalletData(wallet.address);
@@ -1609,13 +1751,13 @@ export class APIServer {
         label: wallet.label ?? null,
         balance: walletData.balance,
         nonce: walletData.nonce,
-        status: 'active' as const,
+        status: 'active',
         group: wallet.group ?? null,
         tier: wallet.tier ?? null,
         derivationIndex: wallet.derivationIndex ?? null,
         transactions24h: walletData.transactions24h,
         lastActivity: walletData.lastActivity,
-        createdAt: wallet.createdAt instanceof Date ? wallet.createdAt.toISOString() : wallet.createdAt,
+        createdAt: wallet.createdAt instanceof Date ? wallet.createdAt.toISOString() : new Date(wallet.createdAt).toISOString(),
         tokenBalances: walletData.tokenBalances
       };
     } catch (error) {
@@ -1627,13 +1769,13 @@ export class APIServer {
         label: wallet.label ?? null,
         balance: '0',
         nonce: 0,
-        status: 'active' as const,
+        status: 'active',
         group: wallet.group ?? null,
         tier: wallet.tier ?? null,
         derivationIndex: wallet.derivationIndex ?? null,
         transactions24h: 0,
         lastActivity: new Date().toISOString(),
-        createdAt: wallet.createdAt instanceof Date ? wallet.createdAt.toISOString() : wallet.createdAt,
+        createdAt: wallet.createdAt instanceof Date ? wallet.createdAt.toISOString() : new Date(wallet.createdAt).toISOString(),
         tokenBalances: []
       };
     }
@@ -1655,55 +1797,190 @@ export class APIServer {
     };
   }
 
-  private mergeSettings<T extends Record<string, any>>(target: T, source: Record<string, any>): T {
-    const output = { ...target } as Record<string, any>;
+  private mergeSettings(target: SystemSettings, source: Record<string, unknown>): SystemSettings {
+    const merged: SystemSettings = {
+      trading: { ...target.trading },
+      risk_management: { ...target.risk_management },
+      monitoring: { ...target.monitoring },
+    };
 
-    for (const [key, value] of Object.entries(source)) {
-      if (value && typeof value === 'object' && !Array.isArray(value)) {
-        const current = output[key];
-        const base = current && typeof current === 'object' && !Array.isArray(current)
-          ? (current as Record<string, any>)
-          : {};
-        output[key] = this.mergeSettings(base, value);
-      } else {
-        output[key] = value;
+    const tradingUpdates = source['trading'];
+    if (this.isPlainObject(tradingUpdates)) {
+      const defaultSlippage = tradingUpdates['default_slippage'];
+      if (typeof defaultSlippage === 'number' && Number.isFinite(defaultSlippage)) {
+        merged.trading.default_slippage = defaultSlippage;
+      }
+
+      const maxSlippage = tradingUpdates['max_slippage'];
+      if (typeof maxSlippage === 'number' && Number.isFinite(maxSlippage)) {
+        merged.trading.max_slippage = maxSlippage;
+      }
+
+      const maxOpenPositions = tradingUpdates['max_open_positions'];
+      if (typeof maxOpenPositions === 'number' && Number.isFinite(maxOpenPositions)) {
+        merged.trading.max_open_positions = maxOpenPositions;
+      }
+
+      const autoRebalance = tradingUpdates['auto_rebalance'];
+      if (typeof autoRebalance === 'boolean') {
+        merged.trading.auto_rebalance = autoRebalance;
       }
     }
 
-    return output as T;
+    const riskUpdates = source['risk_management'];
+    if (this.isPlainObject(riskUpdates)) {
+      const maxDrawdown = riskUpdates['max_drawdown'];
+      if (typeof maxDrawdown === 'number' && Number.isFinite(maxDrawdown)) {
+        merged.risk_management.max_drawdown = maxDrawdown;
+      }
+
+      const maxPositionSize = riskUpdates['max_position_size'];
+      if (typeof maxPositionSize === 'number' && Number.isFinite(maxPositionSize)) {
+        merged.risk_management.max_position_size = maxPositionSize;
+      }
+
+      const stopLossThreshold = riskUpdates['stop_loss_threshold'];
+      if (typeof stopLossThreshold === 'number' && Number.isFinite(stopLossThreshold)) {
+        merged.risk_management.stop_loss_threshold = stopLossThreshold;
+      }
+    }
+
+    const monitoringUpdates = source['monitoring'];
+    if (this.isPlainObject(monitoringUpdates)) {
+      const alertWebhook = monitoringUpdates['alert_webhook'];
+      if (typeof alertWebhook === 'string' || alertWebhook === null) {
+        merged.monitoring.alert_webhook = alertWebhook;
+      }
+
+      const anomalyDetection = monitoringUpdates['anomaly_detection'];
+      if (typeof anomalyDetection === 'boolean') {
+        merged.monitoring.anomaly_detection = anomalyDetection;
+      }
+
+      const heartbeatInterval = monitoringUpdates['heartbeat_interval_seconds'];
+      if (typeof heartbeatInterval === 'number' && Number.isFinite(heartbeatInterval)) {
+        merged.monitoring.heartbeat_interval_seconds = heartbeatInterval;
+      }
+    }
+
+    return merged;
+  }
+
+  private extractCount(result: unknown): number {
+    if (!Array.isArray(result) || result.length === 0) {
+      return 0;
+    }
+
+    const [first] = result;
+    if (!first || typeof first !== 'object') {
+      return 0;
+    }
+
+    const candidate = (first as Record<string, unknown>).count;
+    if (typeof candidate === 'number') {
+      return candidate;
+    }
+    if (typeof candidate === 'bigint') {
+      return Number(candidate);
+    }
+    if (typeof candidate === 'string') {
+      const parsed = Number(candidate);
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+
+    return 0;
+  }
+
+  private isPlainObject(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+  }
+
+  private isBatchOperationRequest(value: unknown): value is BatchOperationRequest {
+    if (!this.isPlainObject(value)) {
+      return false;
+    }
+
+    const candidate: Record<string, unknown> = value;
+    const type = candidate.type;
+    const walletAddress = candidate.walletAddress;
+    const tokenIn = candidate.tokenIn;
+    const tokenOut = candidate.tokenOut;
+
+    if (
+      typeof type !== 'string' ||
+      typeof walletAddress !== 'string' ||
+      typeof tokenIn !== 'string' ||
+      typeof tokenOut !== 'string'
+    ) {
+      return false;
+    }
+
+    const amount = candidate.amountIn;
+    return typeof amount === 'string' || typeof amount === 'number';
+  }
+
+  private getErrorStatusCode(error: unknown): number | undefined {
+    if (this.isPlainObject(error)) {
+      const candidate = error.statusCode;
+      if (typeof candidate === 'number' && Number.isInteger(candidate)) {
+        return candidate;
+      }
+    }
+
+    return undefined;
+  }
+
+  private getErrorDetails(error: unknown): unknown {
+    if (this.isPlainObject(error) && 'details' in error) {
+      return error.details;
+    }
+
+    return undefined;
   }
 
   private setupErrorHandling(): void {
     // Global error handler
-    this.app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    this.app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      const message = formatError(error);
+      const stack = error instanceof Error ? error.stack : undefined;
+      const statusCode = this.getErrorStatusCode(error) ?? 500;
+      const details = this.getErrorDetails(error);
+
       logger.error({
-        error: error.message,
-        stack: error.stack,
+        error: message,
+        stack,
         method: req.method,
         url: req.url,
         body: req.body,
       }, 'API Error');
 
-      // Don't leak error details in production
-      const message = process.env.NODE_ENV === 'production' 
-        ? 'Internal server error'
-        : error.message;
-
-      res.status(error.statusCode || 500).json({
+      const responseBody: Record<string, unknown> = {
         success: false,
-        message,
-        ...(process.env.NODE_ENV !== 'production' && { 
-          stack: error.stack,
-          details: error.details 
-        }),
-      });
+        message: process.env.NODE_ENV === 'production'
+          ? 'Internal server error'
+          : message,
+      };
+
+      if (process.env.NODE_ENV !== 'production') {
+        if (stack) {
+          responseBody.stack = stack;
+        }
+        if (details !== undefined) {
+          responseBody.details = details;
+        }
+      }
+
+      res.status(statusCode).json(responseBody);
     });
 
     // Unhandled promise rejection handler
-    process.on('unhandledRejection', (reason: any, promise: Promise<any>) => {
+    process.on('unhandledRejection', (reason: unknown, _promise: Promise<unknown>) => {
+      const message = formatError(reason);
+      const stack = reason instanceof Error ? reason.stack : undefined;
+
       logger.error({
-        reason: reason.toString(),
-        stack: reason.stack,
+        reason: message,
+        stack,
       }, 'Unhandled Promise Rejection');
     });
 
@@ -1746,8 +2023,13 @@ export class APIServer {
       this.setupWebSocket();
 
       // Start listening
+      const server = this.server;
+      if (!server) {
+        throw new Error('HTTP server was not initialized');
+      }
+
       await new Promise<void>((resolve, reject) => {
-        this.server.listen(this.port, '127.0.0.1', (error?: Error) => {
+        server.listen(this.port, '127.0.0.1', (error?: Error) => {
           if (error) {
             reject(error);
           } else {
@@ -1827,23 +2109,32 @@ export class APIServer {
     });
   }
 
-  private handleWebSocketMessage(ws: any, message: any): void {
+  private handleWebSocketMessage(ws: WebSocket, message: unknown): void {
+    if (!this.isPlainObject(message) || typeof message.type !== 'string') {
+      ws.send(JSON.stringify({ error: 'Unknown message type' }));
+      return;
+    }
+
     switch (message.type) {
-      case 'subscribe':
-        // Handle subscription requests
+      case 'subscribe': {
+        const channels = Array.isArray(message.channels)
+          ? message.channels.filter((channel): channel is string => typeof channel === 'string')
+          : [];
+
         ws.send(JSON.stringify({
           type: 'subscription',
-          data: { status: 'subscribed', channels: message.channels },
+          data: { status: 'subscribed', channels },
         }));
         break;
-      
+      }
+
       case 'ping':
         ws.send(JSON.stringify({
           type: 'pong',
           data: { timestamp: new Date().toISOString() },
         }));
         break;
-      
+
       default:
         ws.send(JSON.stringify({
           error: 'Unknown message type',
@@ -1852,12 +2143,21 @@ export class APIServer {
   }
 
   // Broadcast to all connected WebSocket clients
-  public broadcast(data: any): void {
-    if (!this.wss) return;
+  public broadcast(data: unknown): void {
+    if (!this.wss) {
+      return;
+    }
 
-    const message = JSON.stringify(data);
+    let message: string;
+    try {
+      message = JSON.stringify(data);
+    } catch (error) {
+      logger.error({ error: formatError(error) }, 'Failed to broadcast message');
+      return;
+    }
+
     this.wss.clients.forEach((client) => {
-      if (client.readyState === client.OPEN) {
+      if (client.readyState === WebSocket.OPEN) {
         client.send(message);
       }
     });
@@ -1873,12 +2173,14 @@ export class APIServer {
     }
 
     // Close HTTP server
-    if (this.server) {
+    const server = this.server;
+    if (server) {
       await new Promise<void>((resolve) => {
-        this.server.close(() => {
+        server.close(() => {
           resolve();
         });
       });
+      this.server = null;
     }
 
     logger.info('API server stopped');

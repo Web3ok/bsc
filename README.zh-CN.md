@@ -82,12 +82,21 @@ ENCRYPTION_PASSWORD=your-strong-encryption-password-here
 API_PORT=10001
 ```
 
+### 🔐 认证流程
+
+1. 调用 `POST /api/auth/nonce` 获取一次性随机数（响应包含完整签名文案）
+2. 使用钱包签名 `Sign in to BSC Trading Bot\nAddress: {address}\nNonce: {nonce}`
+3. 调用 `POST /api/auth/login`，提交 `walletAddress + nonce + signature` 获得 JWT
+4. 所有 `/api/v1/*` 与 `/api/trading` 接口都需携带 `Authorization: Bearer <token>`
+5. 开发调试可通过 `.env` 设置 `DISABLE_AUTH=true` 或 `ALLOW_DEV_LOGIN=true` 临时关闭鉴权
+
 ### 🎯 启动服务
 
 #### 方式 1: 开发模式 (推荐用于测试)
 
 ```bash
 # 启动后端 API 服务器 (端口: 10001)
+# 默认启用鉴权，如需调试可临时设置 DISABLE_AUTH=true
 npm run server:dev
 
 # 新终端窗口: 启动前端开发服务器 (端口: 10002)
@@ -109,7 +118,7 @@ npm run deploy:pm2
 
 - **前端界面**: http://localhost:10002
 - **API 端点**: http://localhost:10001
-- **WebSocket**: ws://localhost:10001
+- **WebSocket**: ws://localhost:10001/ws
 
 ---
 
